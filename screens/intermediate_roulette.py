@@ -97,6 +97,7 @@ class IntermediateRoulette(MainMenuScreen):
 
     def change_to_game(self, instance):
         """Переход к игровому экрану"""
+        print(f"Перехрд на {instance.sport}")
         self.manager.current = instance.sport
         self.manager.get_screen(instance.sport).start_game()
 

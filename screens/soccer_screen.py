@@ -1,4 +1,3 @@
-# screens/soccer_screen.py - ДОБАВЬТЕ ЭТО
 from screens.game_screen import GameScreen
 import os
 
@@ -41,30 +40,3 @@ class SoccerScreen(GameScreen):
 
         print(f"ball_size: {self.ball_size}")
         print(f"ball_type: {self.ball_type}")
-#
-# # screens/basketball_screen.py
-# class BasketballScreen(GameScreen):
-#     """Экран с баскетбольным мячом"""
-#
-#     def __init__(self, **kwargs):
-#         super().__init__(**kwargs)
-#
-#         self.sprite_sheet_path = 'assets/images/balls/sprite_sheets/basketball_64.png'
-#         self.background_image = 'assets/images/backgrounds/basketball_court.jpg'
-#         self.sound_file = 'assets/sounds/basketball_bounce.wav'
-#         self.ball_size = 120
-#         self.ball_type = 'basketball'
-#
-#
-# # screens/volleyball_screen.py
-# class VolleyballScreen(GameScreen):
-#     """Экран с волейбольным мячом"""
-#
-#     def __init__(self, **kwargs):
-#         super().__init__(**kwargs)
-#
-#         self.sprite_sheet_path = 'assets/images/balls/sprite_sheets/volleyball_64.png'
-#         self.background_image = 'assets/images/backgrounds/volleyball_court.jpg'
-#         self.sound_file = 'assets/sounds/volleyball_bounce.wav'
-#         self.ball_size = 100
-#         self.ball_type = 'volleyball'

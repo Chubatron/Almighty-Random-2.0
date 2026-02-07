@@ -167,6 +167,7 @@ class SpriteSheetBall(Widget):
         # Координаты текстуры
         tex_left = col / self.cols
         tex_right = (col + 1) / self.cols
+
         tex_top = row / self.rows
         tex_bottom = (row + 1) / self.rows
 
@@ -179,7 +180,7 @@ class SpriteSheetBall(Widget):
         )
 
         print(f"Кадр {frame_idx} (row={row}, col={col})")
-        print(f"Координаты: {tex_coords}")
+        print(f"Координаты : {tex_coords}")
 
         self.canvas.clear()
 

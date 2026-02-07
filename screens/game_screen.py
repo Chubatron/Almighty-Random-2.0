@@ -1,3 +1,5 @@
+import random
+
 from kivy.uix.screenmanager import Screen
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
@@ -48,6 +50,9 @@ class GameScreen(Screen):
         # Привязываем обновление размеров
         self.bind(size=self._on_size_change)
 
+        self.stop_effect = None
+        self.show_stop_effect = True  # Флаг для включения/выключения
+
     def _on_size_change(self, instance, value):
         """Обновляет позицию мяча при изменении размера экрана"""
         if self.ball_widget and self.ball_physics:
@@ -70,6 +75,8 @@ class GameScreen(Screen):
 
         self.back_button = self.create_back_button()
         self.layout.add_widget(self.back_button)
+        self.checking_stop = False  # Флаг проверки остановки
+
 
     def create_back_button(self):
         """Создает кнопку возврата в меню с картинкой"""
@@ -140,24 +147,74 @@ class GameScreen(Screen):
             # Останавливаем физику, если мяч почти остановился
             if self.ball_physics.velocity.length() < 0.5:
                 self.is_physics_enabled = False
+                if self.show_stop_effect and not self.checking_stop:
+                    self.checking_stop = True
+                    Clock.schedule_once(self.trigger_stop_effect, 0.5)
                 self.total_distance_traveled = 0
 
+    def trigger_stop_effect(self, dt):
+        """Запуск эффекта остановки с задержкой"""
+        if (self.ball_physics and
+                self.ball_physics.velocity.length() < 0.5 and
+                self.ball_widget):
+
+            print("🎯 Мяч остановился, запускаю эффект!")
+
+            # Создаём эффект если ещё нет
+            if not self.stop_effect:
+                from components.stop_effect import BallStopEffect
+                self.stop_effect = BallStopEffect(
+                    ball_size=self.ball_size,
+                    ball_color=[1, 1, 1, 1]
+                )
+                self.layout.add_widget(self.stop_effect)
+
+            # Центр мяча
+            center_x = self.ball_widget.center_x
+            center_y = self.ball_widget.center_y
+
+            # Случайное сообщение
+            messages = [
+                "ДА",
+                "НЕТ",
+                "ПОПРОБУЙ ЕЩЕ РАЗ",
+                "ПОДУМАЙ ДВАЖДЫ",
+                "СОМНЕВАЕШСЯ? НЕ ДЕЛАЙ!",
+                "ВЫБЕРИ ДРУШУЮ СТОРОНУ"
+            ]
+            message = random.choice(messages)
+
+            # Запускаем эффект
+            self.stop_effect.play(center_x, center_y, message)
+
+        self.checking_stop = False
+
     def update_animation(self, dt):
-        """Обновляет анимацию отдельно от физики (для плавности)"""
+        """Анимация, привязанная к скорости"""
         if self.ball_widget and self.ball_physics:
-            # Вычисляем кадр на основе пройденного расстояния
-            total_frames = self.ball_widget.rows * self.ball_widget.cols
+            speed = self.ball_physics.velocity.length()
 
-            frame_index = self.ball_physics.get_animation_frame(
-                total_frames=total_frames,
-                distance_traveled=self.total_distance_traveled
-            )
+            # Если мяч движется - анимируем
+            if speed > 0.1:
+                # Чем быстрее мяч, тем быстрее анимация
+                animation_speed = min(2.0, speed / 30)  # Коэффициент
 
-            # Устанавливаем кадр
-            self.ball_widget.frame_index = frame_index
+                # Увеличиваем счётчик кадров в зависимости от скорости
+                self.animation_counter += animation_speed
 
-            # Также можно использовать угол вращения из физики
-            self.ball_widget.rotation_angle = self.ball_physics.rotation_angle
+                # Вычисляем кадр
+                total_frames = self.ball_widget.rows * self.ball_widget.cols
+                frame_index = int(self.animation_counter) % total_frames
+
+                self.ball_widget.frame_index = frame_index
+
+                # Определяем направление вращения
+                if self.ball_physics.velocity.x < 0:  # Движение влево
+                    self.ball_widget.frame_index = total_frames - frame_index - 1
+            else:
+                # Мяч остановился - статичный кадр
+                self.ball_widget.frame_index = 0
+                self.animation_counter = 0
 
     def setup_background(self):
         """Настраивает фон"""
@@ -327,6 +384,11 @@ class GameScreen(Screen):
             self.ball_physics = None
             self.is_physics_enabled = False
             self.touch_start_pos = None
+
+            # Убираем эффект если есть
+            if self.stop_effect and self.stop_effect.parent:
+                self.layout.remove_widget(self.stop_effect)
+                self.stop_effect = None
 
     def remove_panel(self):
         print(self.layout.children)
