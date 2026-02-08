@@ -5,13 +5,55 @@ from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.button import Button
-from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.widget import Widget
 from kivy.uix.popup import Popup
 from kivy.graphics import Color, Rectangle
 from screens.base_game_screen import BaseGameScreen
+from kivy.properties import NumericProperty
+from kivy.graphics import Rotate
+from kivy.graphics import Rotate, PushMatrix, PopMatrix
 
+class RotatingImage(Image):
+    """Image с поддержкой вращения вокруг центра"""
+    angle = NumericProperty(0)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        # Инициализируем графические инструкции
+        self._rotate = None
+        self._setup_graphics()
+
+        # Привязываем обновление центра вращения И угла!
+        self.bind(
+            pos=self._update_origin,
+            size=self._update_origin,
+            angle=self._update_angle  # Добавьте эту строку!
+        )
+
+    def _setup_graphics(self):
+        """Настраиваем графические инструкции для вращения"""
+        with self.canvas.before:
+            PushMatrix()
+            self._rotate = Rotate(angle=self.angle, origin=self.center)
+        with self.canvas.after:
+            PopMatrix()
+
+    def _update_angle(self, instance, value):
+        """Обновляет угол вращения"""
+        if self._rotate:
+            self._rotate.angle = value
+            print(f"Angle updated: {value}")  # Для отладки
+
+    def _update_origin(self, *args):
+        """Обновляет центр вращения - теперь точно центр виджета"""
+        if self._rotate:
+            # Вычисляем абсолютный центр виджета
+            center_x = self.x + self.width / 2
+            center_y = self.y + self.height / 2
+            self._rotate.origin = (center_x, center_y)
+            print(f"Center updated: ({center_x}, {center_y})")
 
 class ToggleButtonWithLabel(ButtonBehavior, FloatLayout):
     """Кнопка с изображением как фоном и текстом по центру"""
@@ -186,7 +228,7 @@ class RouletteScreen(BaseGameScreen):
         wheel_size = 450 if self.roulette_type == 'american' else 400
         wheel_source = 'assets/images/Roulette_wheel_00.png' if self.roulette_type == 'american' else 'assets/images/Roulette_wheel_0.png'
 
-        self.wheel = Image(
+        self.wheel = RotatingImage(
             source=wheel_source,
             size_hint=(None, None),
             size=(wheel_size, wheel_size),
@@ -249,24 +291,38 @@ class RouletteScreen(BaseGameScreen):
 
     def spin_wheel(self, instance=None):
         """Запуск вращения колеса рулетки"""
-        if self.is_spinning:
+        if self.is_spinning or not self.wheel:
             return
 
         print(f"🎰 Запускаю {self.roulette_type} рулетку...")
+        print(f"Позиция колеса: {self.wheel.pos}, размер: {self.wheel.size}")
+        print(f"Центр колеса: {self.wheel.center}")
+
         self.is_spinning = True
 
-        # Случайное количество вращений
-        rotations = (360 * random.randint(3, 8)) + random.randint(0, 360)
+        # Убедимся, что угол сбрасывается
+        current_angle = self.wheel.angle % 360
 
-        # Простая анимация вращения
-        self.current_rotation = 0
+        # Добавляем случайное количество вращений
+        additional_rotations = (360 * random.randint(3, 8)) + random.randint(0, 360)
+        target_angle = current_angle + additional_rotations
+
+        # Создаем анимацию
         anim = Animation(
-            current_rotation=rotations,
-            duration=random.uniform(3.0, 5.0)
+            angle=target_angle,
+            duration=random.uniform(3.0, 5.0),
+            t='out_cubic'
         )
-        anim.bind(on_progress=self._on_spin_progress)
+
+        # Привязываем обработчики
         anim.bind(on_complete=self._on_spin_complete)
-        anim.start(self)
+
+        # Запускаем анимацию
+        anim.start(self.wheel)
+
+        # Обновляем позицию для отладки
+        if hasattr(self.wheel, '_update_origin'):
+            self.wheel._update_origin()
 
     def _on_spin_progress(self, animation, widget, progress):
         """Обновление вращения во время анимации"""
@@ -312,9 +368,9 @@ class RouletteScreen(BaseGameScreen):
         # Добавляем фон-изображение для попапа
         try:
             popup_bg = Image(
-                source='assets/images/Output_roulette.png',
+                source='assets/images/Out_image.png',
                 allow_stretch=True,
-                keep_ratio=False,
+                keep_ratio=True,
                 size_hint=(1, 1),
                 pos_hint={'x': 0, 'y': 0}
             )
@@ -324,28 +380,7 @@ class RouletteScreen(BaseGameScreen):
             with main_layout.canvas.before:
                 Color(0.1, 0.1, 0.2, 0.95)
                 Rectangle(size=main_layout.size, pos=main_layout.pos)
-
             main_layout.bind(size=self._update_rect, pos=self._update_rect)
-
-        # Основной контент (центрированный)
-        content = BoxLayout(
-            orientation='vertical',
-            padding=40,
-            spacing=20,
-            size_hint=(0.9, 0.8),
-            pos_hint={'center_x': 0.5, 'center_y': 0.5}
-        )
-        content.opacity = 0
-        content.scale = 0.9
-
-        # Заголовок с типом рулетки
-        title_label = Label(
-            text=self.roulette_data[self.roulette_type]['name'],
-            font_size='24sp',
-            bold=True,
-            color=(0.9, 0.9, 0.2, 1)
-        )
-        content.add_widget(title_label)
 
         # Разделяем результат на число и цвет
         parts = result.split()
@@ -357,72 +392,57 @@ class RouletteScreen(BaseGameScreen):
             (0.8, 0, 0, 1) if color == 'RED' else \
                 (0, 0, 0, 1)
 
-        # Английское название цвета для отображения
-        display_color = color if color in ['GREEN', 'RED', 'BLACK'] else 'BLACK'
-
-        # Выигрышный номер
+        # Выигрышный номер (содержимое попапа)
         number_label = Label(
             text=number,
-            font_size='64sp',
+            font_size='96sp',  # Увеличил размер шрифта
             bold=True,
-            color=number_color
+            color=number_color,
+            size_hint=(None, None),
+            size=(200, 200),
+            pos_hint={'center_x': 0.5, 'center_y': 0.5}
         )
-        content.add_widget(number_label)
+        main_layout.add_widget(number_label)
 
-        # Цвет
-        color_label = Label(
-            text=display_color,
-            font_size='36sp',
-            bold=True,
-            color=number_color
-        )
-        content.add_widget(color_label)
-
-        # Кнопка OK
-        ok_btn = Button(
-            text='OK',
-            size_hint=(0.5, None),
-            height=60,
-            pos_hint={'center_x': 0.5},
-            background_color=(0.3, 0.6, 0.3, 1),
-            background_normal='',
-            font_size='24sp',
-            bold=True
-        )
-
-        def dismiss_with_animation(instance):
+        # Функция для плавного закрытия попапа при нажатии
+        def dismiss_popup_with_animation(instance):
             """Плавное закрытие попапа с анимацией"""
             # Анимация исчезновения с уменьшением масштаба
             anim_scale = Animation(
                 scale=0.8,
                 opacity=0,
-                duration=0.4,
+                duration=0.3,
                 t='out_cubic'
             )
             anim_scale.start(main_layout)
 
-            # Анимация для контента
-            anim_content = Animation(
-                scale=0.9,
+            # Анимация для текста
+            anim_text = Animation(
                 opacity=0,
                 duration=0.3,
                 t='out_cubic'
             )
-            anim_content.start(content)
+            anim_text.start(number_label)
 
             # Закрываем попап после анимации
             from kivy.clock import Clock
-            Clock.schedule_once(lambda dt: self.result_popup.dismiss(), 0.5)
+            Clock.schedule_once(lambda dt: self.result_popup.dismiss(), 0.35)
 
-        ok_btn.bind(on_press=dismiss_with_animation)
-        content.add_widget(ok_btn)
-        main_layout.add_widget(content)
+        # Создаем прозрачную кнопку на весь попап для закрытия
+        close_button = Button(
+            text='',
+            size_hint=(1, 1),
+            background_color=(0, 0, 0, 0),  # Прозрачная
+            background_normal=''
+        )
+        close_button.bind(on_press=dismiss_popup_with_animation)
+        main_layout.add_widget(close_button)
 
         # Создаем попап
         self.result_popup = Popup(
             title='',
             content=main_layout,
-            size_hint=(0.8, 0.6),
+            size_hint=(0.7, 0.7),  # Немного увеличил размер
             pos_hint={'center_x': 0.5, 'center_y': 0.5},
             separator_height=0,
             background='',
@@ -436,25 +456,38 @@ class RouletteScreen(BaseGameScreen):
             # Сначала делаем попап видимым
             self.result_popup.opacity = 1
 
-            # Параллельная анимация для фона: увеличение масштаба + появление
+            # Анимация для фона: увеличение масштаба + появление
             anim_bg = Animation(
                 scale=1,
                 opacity=1,
-                duration=0.5,
+                duration=0.4,
                 t='out_back'
             )
             anim_bg.start(main_layout)
 
-            # Анимация для контента с задержкой
+            # Анимация для текста с задержкой для лучшего эффекта
             from kivy.clock import Clock
+            number_label.opacity = 0
+            number_label.scale = 1.2
+
+            anim_text_scale = Animation(
+                scale=1,
+                duration=0.4,
+                t='out_back'
+            )
+
+            anim_text_opacity = Animation(
+                opacity=1,
+                duration=0.4,
+                t='out_cubic'
+            )
+
             Clock.schedule_once(
-                lambda dt: Animation(
-                    scale=1,
-                    opacity=1,
-                    duration=0.4,
-                    t='out_back'
-                ).start(content),
-                0.1
+                lambda dt: (
+                    anim_text_scale.start(number_label),
+                    anim_text_opacity.start(number_label)
+                ),
+                0.15
             )
 
         # Открываем попап и запускаем анимацию
@@ -477,19 +510,41 @@ class RouletteScreen(BaseGameScreen):
 
     def create_simple_wheel(self, container):
         """Создает простую рулетку если нет картинки"""
-        from kivy.graphics import Color, Ellipse, Line
+        from kivy.graphics import Color, Ellipse, Line, Rotate
 
         class SimpleWheel(Widget):
+            angle = NumericProperty(0)
+
             def __init__(self, roulette_type='european', **kwargs):
                 super().__init__(**kwargs)
                 self.roulette_type = roulette_type
                 self.size = (450, 450) if roulette_type == 'american' else (400, 400)
                 self.pos_hint = {'center_x': 0.5, 'center_y': 0.5}
-                self.rotation = 0
+
+                # Установка графических инструкций для вращения
+                with self.canvas.before:
+                    PushMatrix()
+                    self.rotate_instruction = Rotate(angle=self.angle, origin=self.center)
+                with self.canvas.after:
+                    PopMatrix()
+
+                # Привязка обновлений
+                self.bind(pos=self.update_origin, size=self.update_origin, angle=self.update_angle)
+
                 self.draw_wheel()
+
+            def update_origin(self, *args):
+                """Обновить центр вращения"""
+                self.rotate_instruction.origin = (self.center_x, self.center_y)
+
+            def update_angle(self, *args):
+                """Обновить угол вращения"""
+                self.rotate_instruction.angle = self.angle
 
             def draw_wheel(self):
                 self.canvas.clear()
+                center_x, center_y = self.width / 2, self.height / 2
+
                 with self.canvas:
                     # Основной круг
                     Color(0.7, 0.1, 0.1, 1)
@@ -503,7 +558,6 @@ class RouletteScreen(BaseGameScreen):
 
                     # Сектора
                     Color(1, 1, 1, 1)
-                    center_x, center_y = self.size[0] / 2, self.size[1] / 2
                     radius = min(self.size) / 2 - 50
 
                     # Разное количество секторов для разных типов
