@@ -11,8 +11,8 @@ from kivy.uix.popup import Popup
 from kivy.graphics import Color, Rectangle
 from screens.base_game_screen import BaseGameScreen
 from kivy.properties import NumericProperty
-from kivy.graphics import Rotate
 from kivy.graphics import Rotate, PushMatrix, PopMatrix
+
 
 class RotatingImage(Image):
     """Image с поддержкой вращения вокруг центра"""
@@ -44,7 +44,6 @@ class RotatingImage(Image):
         """Обновляет угол вращения"""
         if self._rotate:
             self._rotate.angle = value
-            print(f"Angle updated: {value}")  # Для отладки
 
     def _update_origin(self, *args):
         """Обновляет центр вращения - теперь точно центр виджета"""
@@ -103,7 +102,6 @@ class ImageButton(ButtonBehavior, Image):
 
 class RouletteScreen(BaseGameScreen):
     """Экран рулетки - только колесо и запуск"""
-
     def __init__(self, game_manager=None, **kwargs):
         super().__init__(**kwargs)
         self.name = 'roulette'
@@ -118,7 +116,8 @@ class RouletteScreen(BaseGameScreen):
         self.is_spinning = False
         self.current_rotation = 0
 
-        # Тип рулетки: 'european' (0-36) или 'american' (0, 00, 1-36)
+        # Кнопка шарика для вращения
+        self.spin_button = None  # Добавляем атрибут для кнопки
 
         # Данные для разных типов рулеток
         self.roulette_data = {
@@ -179,6 +178,13 @@ class RouletteScreen(BaseGameScreen):
             }
         }
 
+        # Кнопка-переключатель типа рулетки с надписью
+        self.type_switch_button = ToggleButtonWithLabel(
+            size_hint=(1, 1),
+            size=(250, 60),
+            pos_hint={'center_x': 0.5, 'center_y': 0.9}
+        )
+
     def on_enter(self):
         """При входе на экран"""
         super().on_enter()
@@ -189,13 +195,6 @@ class RouletteScreen(BaseGameScreen):
         """Показать вид с вращающимся колесом"""
         print(f"Экран {self.roulette_data[self.roulette_type]['name']}")
         self.clear_layout()
-
-        # Кнопка-переключатель типа рулетки с надписью
-        self.type_switch_button = ToggleButtonWithLabel(
-            size_hint=(1, 1),
-            size=(250, 60),
-            pos_hint={'center_x': 0.5, 'center_y': 0.9}
-        )
 
         # Устанавливаем изображение и текст
         data = self.roulette_data[self.roulette_type]
@@ -244,15 +243,15 @@ class RouletteScreen(BaseGameScreen):
         self.layout.add_widget(wheel_container)
 
         # Кнопка запуска рулетки (изображение белого шарика)
-        spin_button = ImageButton(
+        self.spin_button = ImageButton(  # Сохраняем ссылку в атрибуте
             source='assets/images/buttons/Roulette_ball.png',
             size_hint=(None, None),
             size=(100, 100),
             pos_hint={'center_x': 0.5, 'y': 0.05},
             color=(1, 1, 1, 1)
         )
-        spin_button.bind(on_press=self.spin_wheel)
-        self.layout.add_widget(spin_button)
+        self.spin_button.bind(on_press=self.spin_wheel)
+        self.layout.add_widget(self.spin_button)
 
     def toggle_roulette_type(self, instance=None):
         """Переключить тип рулетки по нажатию кнопки"""
@@ -295,17 +294,37 @@ class RouletteScreen(BaseGameScreen):
             return
 
         print(f"🎰 Запускаю {self.roulette_type} рулетку...")
-        print(f"Позиция колеса: {self.wheel.pos}, размер: {self.wheel.size}")
-        print(f"Центр колеса: {self.wheel.center}")
+
+        # Скрываем кнопку шарика с анимацией
+        if self.spin_button:
+            anim_hide = Animation(
+                opacity=0,
+                duration=0.3,
+                t='out_cubic'
+            )
+            anim_hide.bind(on_complete=lambda *args: setattr(self.spin_button, 'disabled', True))
+            anim_hide.start(self.spin_button)
 
         self.is_spinning = True
 
-        # Убедимся, что угол сбрасывается
+        # Нормализуем текущий угол к диапазону 0-360
         current_angle = self.wheel.angle % 360
 
-        # Добавляем случайное количество вращений
-        additional_rotations = (360 * random.randint(3, 8)) + random.randint(0, 360)
+        # Устанавливаем нормализованный угол (чтобы колесо не вращалось с больших углов)
+        self.wheel.angle = current_angle
+
+        # Добавляем случайное количество вращений (всегда положительное)
+        full_rotations = random.randint(5, 8)  # 5-8 полных оборотов
+        partial_rotation = random.randint(0, 360)  # 0-360 градусов дополнительно
+
+        # Вычисляем целевой угол
+        additional_rotations = 360 * full_rotations + partial_rotation
         target_angle = current_angle + additional_rotations
+
+        print(f"Начальный угол (нормализованный): {current_angle}°")
+        print(f"Полных оборотов: {full_rotations}")
+        print(f"Дополнительный угол: {partial_rotation}°")
+        print(f"Целевой угол: {target_angle}°")
 
         # Создаем анимацию
         anim = Animation(
@@ -319,10 +338,6 @@ class RouletteScreen(BaseGameScreen):
 
         # Запускаем анимацию
         anim.start(self.wheel)
-
-        # Обновляем позицию для отладки
-        if hasattr(self.wheel, '_update_origin'):
-            self.wheel._update_origin()
 
     def _on_spin_progress(self, animation, widget, progress):
         """Обновление вращения во время анимации"""
@@ -340,6 +355,23 @@ class RouletteScreen(BaseGameScreen):
 
         # Показываем результат
         self._show_result(winning_sector)
+
+        # После закрытия попапа покажем кнопку шарика
+        # (это будет вызвано из метода закрытия попапа)
+
+    def _show_spin_button(self):
+        """Показать кнопку шарика после завершения вращения"""
+        if self.spin_button:
+            # Сначала включаем кнопку
+            self.spin_button.disabled = False
+
+            # Плавно показываем кнопку
+            anim_show = Animation(
+                opacity=1,
+                duration=0.5,
+                t='out_cubic'
+            )
+            anim_show.start(self.spin_button)
 
     def _get_winning_sector(self):
         """Определяет выигрышный сектор"""
@@ -404,7 +436,6 @@ class RouletteScreen(BaseGameScreen):
         )
         main_layout.add_widget(number_label)
 
-        # Функция для плавного закрытия попапа при нажатии
         def dismiss_popup_with_animation(instance):
             """Плавное закрытие попапа с анимацией"""
             # Анимация исчезновения с уменьшением масштаба
@@ -427,6 +458,9 @@ class RouletteScreen(BaseGameScreen):
             # Закрываем попап после анимации
             from kivy.clock import Clock
             Clock.schedule_once(lambda dt: self.result_popup.dismiss(), 0.35)
+
+            # Показываем кнопку шарика после закрытия попапа
+            Clock.schedule_once(lambda dt: self._show_spin_button(), 0.4)
 
         # Создаем прозрачную кнопку на весь попап для закрытия
         close_button = Button(
@@ -494,7 +528,8 @@ class RouletteScreen(BaseGameScreen):
         self.result_popup.open()
         animate_popup_open()
 
-    def _update_rect(self, instance, value):
+    @staticmethod
+    def _update_rect(instance, value):
         """Обновляет размер прямоугольника фона"""
         if hasattr(instance, 'canvas'):
             instance.canvas.before.clear()
@@ -593,3 +628,8 @@ class RouletteScreen(BaseGameScreen):
         """При выходе с экрана"""
         super().on_leave()
         Animation.cancel_all(self)
+
+        # Восстанавливаем кнопку при выходе с экрана
+        if self.spin_button:
+            self.spin_button.opacity = 1
+            self.spin_button.disabled = False
