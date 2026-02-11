@@ -1,3 +1,5 @@
+from kivy.uix.image import Image
+from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.screenmanager import Screen
 from kivy.uix.floatlayout import FloatLayout
 from kivy.properties import BooleanProperty, NumericProperty, StringProperty
@@ -14,19 +16,37 @@ import random
 
 from screens.base_game_screen import BaseGameScreen
 
+class BulletSprite(KivyImage):
+    """Спрайт патрона в слоте барабана с поворотом"""
 
-class BulletIcon(Button):
-    """Иконка патрона в правом верхнем углу"""
+    def __init__(self, slot_number=0, **kwargs):
+        super().__init__(**kwargs)
+        self.slot_number = slot_number
+        self.source = 'assets/images/guns/Bullet_back.png'  # Тот же файл!
+        self.size_hint = (None, None)
+        self.size = (100, 100)
+        self.allow_stretch = True
+        self.keep_ratio = True
+        self.opacity = 0
+        self.rotation = random.uniform(0, 360)
+        self.is_loaded = False
+
+    def set_loaded(self, loaded):
+        self.is_loaded = loaded
+        self.opacity = 1 if loaded else 0
+
+
+class BulletIcon(ButtonBehavior, Image):
+    """Иконка патрона в правом верхнем углу - ТОЛЬКО ИЗ ФАЙЛА"""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.background_normal = ''
-        self.background_color = (0.8, 0.2, 0.2, 0.9)
+        # ЕДИНСТВЕННЫЙ файл - тот что есть!
+        self.source = 'assets/images/guns/Drum_1024x1024.png'
         self.size_hint = (None, None)
         self.size = (60, 60)
-        self.text = '💀'
-        self.font_size = '28sp'
-        self.bold = True
+        self.allow_stretch = True
+        self.keep_ratio = True
         self.update_border()
 
     def update_border(self):
@@ -37,13 +57,10 @@ class BulletIcon(Button):
             Line(width=2, rectangle=(self.x, self.y, self.width, self.height))
 
     def on_pos(self, *args):
-        """Обновляет обводку при изменении позиции"""
         self.update_border()
 
     def on_size(self, *args):
-        """Обновляет обводку при изменении размера"""
         self.update_border()
-
 
 class BulletSlot(Button):
     """Слот для патрона в барабане револьвера"""
@@ -99,13 +116,14 @@ class BulletSlot(Button):
         # Ждем пока виджет полностью инициализируется
         Clock.schedule_once(lambda dt: self.update_current_indicator(), 0.01)
 
+
 class ChamberModal(ModalView):
     """Модальное окно барабана для зарядки патронов"""
 
     def __init__(self, main_screen, **kwargs):
         super().__init__(**kwargs)
         self.main_screen = main_screen
-        self.background_color = (0, 0, 0, 0.7)  # Полупрозрачный черный фон
+        self.background_color = (0, 0, 0, 0.85)
         self.auto_dismiss = True
         self.size_hint = (0.9, 0.9)
         self.pos_hint = {'center_x': 0.5, 'center_y': 0.5}
@@ -113,96 +131,140 @@ class ChamberModal(ModalView):
         self.layout = FloatLayout()
         self.add_widget(self.layout)
 
-        Clock.schedule_once(self.create_chamber_ui, 0.1)  # Даем время на инициализацию
+        self.bullet_sprites = []
+        self.slot_buttons = []
+
+        Clock.schedule_once(self.create_chamber_ui, 0.1)
 
     def create_chamber_ui(self, dt=None):
         """Создает интерфейс модального окна барабана"""
-        # Фон окна
+        # Затемненный фон
         with self.layout.canvas.before:
-            Color(0, 0, 0, 0)
+            Color(0, 0, 0, 0.85)
             self.bg_rect = Rectangle(pos=self.layout.pos, size=self.layout.size)
-
         self.layout.bind(pos=self.update_bg, size=self.update_bg)
 
-        radius = min(self.layout.width, self.layout.height) * 0.3
-
-        # Изображение барабана
+        # === 1. БАРАБАН (фон) ===
+        drum_size = min(self.layout.width, self.layout.height) * 0.7
         try:
-            # Пытаемся загрузить изображение барабана
             drum_img = KivyImage(
-                source='assets/images/guns/Drum_1024x1024.png',  # Твой файл
+                source='assets/images/guns/Drum_1024x1024.png',
                 size_hint=(None, None),
-                size=(radius * 2.2, radius * 2.2),  # Немного больше слотов
+                size=(drum_size, drum_size),
                 pos_hint={'center_x': 0.5, 'center_y': 0.6},
                 allow_stretch=True,
                 keep_ratio=True
             )
             self.layout.add_widget(drum_img)
         except Exception as e:
-            # Если изображения нет, показываем заглушку
             print(f"Не удалось загрузить изображение барабана: {e}")
-            drum_placeholder = Label(
-                text='БАРАБАН',
-                font_size='24sp',
+            # Рисуем круг-заглушку
+            with self.layout.canvas:
+                Color(0.3, 0.3, 0.3, 0.8)
+                Line(circle=(self.layout.width * 0.5, self.layout.height * 0.6,
+                             drum_size / 2), width=3)
+                Color(0.2, 0.2, 0.2, 0.5)
+                Rectangle(pos=(self.layout.width * 0.5 - drum_size / 2,
+                               self.layout.height * 0.6 - drum_size / 2),
+                          size=(drum_size, drum_size))
+        # Координаты в процентах от размера окна - ПОВЕРНУТЫ на 1/12 (30°)
+        slot_positions = [
+            (0.66, 0.77),  # слот 1 - верх
+            (0.785, 0.66),  # слот 2 - верх-право
+            (0.675, 0.55),  # слот 3 - право
+            (0.45, 0.55),  # слот 4 - низ
+            (0.33, 0.66),  # слот 5 - лево
+            (0.445, 0.765),  # слот 6 - верх-лево
+        ]
+
+        # === ВРЕМЕННАЯ ПОДСВЕТКА ПОЗИЦИЙ ДЛЯ ОТЛАДКИ ===
+        for i, (rel_x, rel_y) in enumerate(slot_positions):
+            x = self.layout.width * rel_x
+            y = self.layout.height * rel_y
+
+            # КРАСНЫЙ КРУГ - позиция патрона
+            with self.layout.canvas:
+                Color(1, 0, 0, 0.5)  # Полупрозрачный красный
+                Line(circle=(x, y, 25), width=2)  # Круг диаметром 50px
+                Color(1, 0, 0, 0.3)
+                Rectangle(pos=(x - 2, y - 2), size=(4, 4))  # Центральная точка
+
+            # ЖЕЛТЫЙ КВАДРАТ - зона касания
+            with self.layout.canvas:
+                Color(1, 1, 0, 0.2)  # Полупрозрачный желтый
+                Line(rectangle=(x - 35, y - 35, 70, 70), width=1)
+
+            # ТЕКСТ С НОМЕРОМ СЛОТА
+            num_label = Label(
+                text=str(i + 1),
+                font_size='16sp',
                 bold=True,
-                color=(0.5, 0.5, 0.5, 0.5),
-                pos_hint={'center_x': 0.5, 'center_y': 0.6},
+                color=(1, 1, 1, 1),
+                pos=(x - 10, y + 30),
                 size_hint=(None, None),
-                size=(200, 200)
+                size=(20, 20),
+                outline_color=(0, 0, 0, 1),
+                outline_width=2
             )
-            self.layout.add_widget(drum_placeholder)
+            self.layout.add_widget(num_label)
 
-        # Создаем барабан с 6 слотами по кругу
-        center_x = self.layout.width * 0.5
-        center_y = self.layout.height * 0.6
-        radius = min(self.layout.width, self.layout.height) * 0.3
-
-        # Создаем 6 слотов по кругу
-        self.slots = []
-        for i in range(6):
-            # Позиции для круга
-            if i == 0:  # сверху
-                x, y = center_x, center_y + radius * 0.7
-            elif i == 1:  # сверху-справа
-                x, y = center_x + radius * 0.6, center_y + radius * 0.35
-            elif i == 2:  # снизу-справа
-                x, y = center_x + radius * 0.6, center_y - radius * 0.35
-            elif i == 3:  # снизу
-                x, y = center_x, center_y - radius * 0.7
-            elif i == 4:  # снизу-слева
-                x, y = center_x - radius * 0.6, center_y - radius * 0.35
-            elif i == 5:  # сверху-слева
-                x, y = center_x - radius * 0.6, center_y + radius * 0.35
-
-            # Создаем слот
-            slot = BulletSlot(
-                slot_number=i,
+            # КООРДИНАТЫ В ПРОЦЕНТАХ
+            coord_label = Label(
+                text=f'({rel_x}, {rel_y})',
+                font_size='10sp',
+                color=(0, 1, 1, 1),
+                pos=(x - 30, y - 45),
                 size_hint=(None, None),
-                size=(70, 70),
-                pos=(x - 35, y - 35)
+                size=(60, 20)
+            )
+            self.layout.add_widget(coord_label)
+
+        # Создаем патроны и зоны касания
+        for i, (rel_x, rel_y) in enumerate(slot_positions):
+            # Конвертируем относительные координаты в абсолютные
+            x = self.layout.width * rel_x
+            y = self.layout.height * rel_y
+
+            # === СПРАЙТ ПАТРОНА (сверху) ===
+            bullet = BulletSprite(
+                slot_number=i,
+                pos=(x - 50, y - 50)  # ИСПРАВЛЕНО: 100/2 = 50
             )
 
             # Копируем состояние из основного экрана
             if i < len(self.main_screen.bullet_slots):
-                slot.has_bullet = self.main_screen.bullet_slots[i].has_bullet
-                slot.update_appearance()
+                bullet.set_loaded(self.main_screen.bullet_slots[i].has_bullet)
 
-            # Обработчик касания
-            slot.bind(on_release=lambda instance, idx=i: self.toggle_slot(idx))
+            self.bullet_sprites.append(bullet)
+            self.layout.add_widget(bullet)
 
-            self.slots.append(slot)
-            self.layout.add_widget(slot)
-
-            # Номер слота
-            slot_num_label = Label(
-                text=str(i + 1),
-                font_size='12sp',
-                color=(0.8, 0.8, 0.8, 0.7),
-                pos=(x - 10, y + 45)
+            # === ЗОНА КАСАНИЯ (невидимая кнопка) ===
+            slot_btn = Button(
+                size_hint=(None, None),
+                size=(70, 70),  # Больше патрона для удобства
+                pos=(x - 35, y - 35),
+                background_normal='',
+                background_color=(0, 0, 0, 0),  # Полностью прозрачная
+                opacity=0.01  # Почти невидимая, но кликабельная
             )
-            self.layout.add_widget(slot_num_label)
+            slot_btn.bind(on_release=lambda instance, idx=i: self.toggle_slot(idx))
 
-        # Кнопка готово
+            self.slot_buttons.append(slot_btn)
+            self.layout.add_widget(slot_btn)
+
+            # === НОМЕР СЛОТА (опционально) ===
+            if False:  # Включи если нужны номера
+                num_label = Label(
+                    text=str(i + 1),
+                    font_size='14sp',
+                    color=(1, 1, 1, 0.5),
+                    pos=(x - 5, y + 30),
+                    size_hint=(None, None),
+                    size=(20, 20)
+                )
+                self.layout.add_widget(num_label)
+
+        # === КНОПКА ГОТОВО ===
         done_btn = Button(
             text='ГОТОВО',
             font_size='20sp',
@@ -210,23 +272,60 @@ class ChamberModal(ModalView):
             size_hint=(None, None),
             size=(200, 60),
             pos_hint={'center_x': 0.5, 'y': 0.05},
-            background_color=(0.2, 0.6, 0.2, 1),
+            background_color=(0.2, 0.6, 0.2, 0.9),
+            background_normal='',
             color=(1, 1, 1, 1)
         )
         done_btn.bind(on_release=self.close_modal)
         self.layout.add_widget(done_btn)
 
+        # === ЗАГОЛОВОК ===
+        title = Label(
+            text='ЗАРЯДКА БАРАБАНА',
+            font_size='18sp',
+            bold=True,
+            color=(1, 0.3, 0.3, 1),
+            pos_hint={'center_x': 0.5, 'top': 0.95},
+            size_hint=(None, None),
+            size=(300, 40)
+        )
+        self.layout.add_widget(title)
+
+        # === ИНСТРУКЦИЯ ===
+        instruction = Label(
+            text='Нажми на патрон чтобы зарядить/разрядить',
+            font_size='14sp',
+            color=(0.8, 0.8, 0.8, 0.9),
+            pos_hint={'center_x': 0.5, 'top': 0.88},
+            size_hint=(None, None),
+            size=(400, 30)
+        )
+        self.layout.add_widget(instruction)
+
     def toggle_slot(self, slot_index):
         """Переключает патрон в слоте"""
-        slot = self.slots[slot_index]
-        slot.toggle_bullet()
+        bullet = self.bullet_sprites[slot_index]
+
+        # Переключаем состояние
+        new_state = not bullet.is_loaded
+        bullet.set_loaded(new_state)
+
+        # Визуальная обратная связь - кратковременное подсвечивание
+        btn = self.slot_buttons[slot_index]
+        original_color = btn.background_color
+        btn.background_color = (1, 1, 1, 0.2)
+        Clock.schedule_once(lambda dt: self.reset_button_color(btn, original_color), 0.1)
+
+    def reset_button_color(self, btn, original_color):
+        """Сбрасывает цвет кнопки"""
+        btn.background_color = original_color
 
     def close_modal(self, instance):
         """Закрывает модальное окно и обновляет основной экран"""
         # Переносим состояние в основной экран
-        for i, slot in enumerate(self.slots):
+        for i, bullet in enumerate(self.bullet_sprites):
             if i < len(self.main_screen.bullet_slots):
-                self.main_screen.bullet_slots[i].has_bullet = slot.has_bullet
+                self.main_screen.bullet_slots[i].has_bullet = bullet.is_loaded
                 self.main_screen.bullet_slots[i].update_appearance()
 
         # Обновляем счетчик патронов
@@ -288,13 +387,17 @@ class RusRouletteScreen(BaseGameScreen):
         # Восстанавливаем фон и кнопку назад
         super().on_enter()
 
-        # Создаем иконку патрона
-        self.create_bullet_icon()
-
-        # Создаем игровые элементы
+        # Сначала создаем пистолет (нижний слой)
         self.create_gun()
+
+        # Затем барабанные слоты (если нужны)
         self.create_bullet_chamber()
+
+        # Затем информационные надписи (средний слой)
         self.create_info_labels()
+
+        # Иконка патрона должна быть ПОСЛЕДНЕЙ (верхний слой)
+        self.create_bullet_icon()
 
         # Обновляем состояние
         self.update_bullet_counter()
@@ -330,19 +433,18 @@ class RusRouletteScreen(BaseGameScreen):
         try:
             self.gun_image = KivyImage(
                 source='assets/images/guns/revolver.png',
-                size_hint=(None, None),
-                size=(400, 200),
-                pos_hint={'center_x': 0.5, 'center_y': 0.55},
-                allow_stretch=True
+                size_hint=(1, 1),  # На весь экран
+                pos_hint={'center_x': 0.5, 'center_y': 0.5},
+                allow_stretch=True,
+                keep_ratio=True  # Сохраняем пропорции
             )
         except:
             # Заглушка если нет изображения
             self.gun_image = Button(
-                text='🔫\n(Жестовое управление)',
-                font_size='16sp',
-                size_hint=(None, None),
-                size=(400, 200),
-                pos_hint={'center_x': 0.5, 'center_y': 0.55},
+                text='🔫\n(Жестовое управление)\nВесь экран',
+                font_size='20sp',
+                size_hint=(1, 1),
+                pos_hint={'center_x': 0.5, 'center_y': 0.5},
                 background_color=(0.3, 0.3, 0.3, 0.7),
                 color=(1, 1, 1, 1)
             )
@@ -358,37 +460,25 @@ class RusRouletteScreen(BaseGameScreen):
         self.layout.add_widget(self.gun_image)
 
     def create_bullet_chamber(self):
-        """Создает барабан с 6 слотами по кругу"""
+        """Создает барабан с 6 слотами для патронов"""
         # Удаляем старые слоты
         for slot in self.bullet_slots:
             self.layout.remove_widget(slot)
         self.bullet_slots = []
 
-        # Центр круга
-        center_x = self.width * 0.5
-        center_y = self.height * 0.55
-        radius = 140
-
-        # Создаем 6 слотов по кругу
+        # СОЗДАЕМ 6 СЛОТОВ (невидимых, для хранения состояния)
         for i in range(6):
-            # Вычисляем позицию
-            angle = 2 * 3.14159 * i / 6
-            x = center_x + radius * 0.9 * (0.8 if i < 3 else 1.2) * 0.5
-            y = center_y + radius * 0.9 * (0.6 if i < 3 else 0.8) * 0.5
-
-            # Создаем слот
             slot = BulletSlot(
                 slot_number=i,
                 size_hint=(None, None),
-                size=(50, 50),
-                pos=(x - 25, y - 25)
+                size=(1, 1),  # Крошечные, невидимые
+                pos=(-100, -100),  # За экраном
+                opacity=0  # Полностью прозрачные
             )
-
-            # Обработчик клика по слоту
-            slot.bind(on_release=lambda instance, idx=i: self.toggle_slot_bullet(idx))
-
             self.bullet_slots.append(slot)
             self.layout.add_widget(slot)
+
+        print(f"✅ Создано 6 слотов для патронов")
 
     def create_info_labels(self):
         """Создает информационные надписи"""
@@ -403,6 +493,17 @@ class RusRouletteScreen(BaseGameScreen):
             size=(450, 50)
         )
 
+        # Информация о состоянии
+        self.result_label = Label(
+            text='Тап по курку - выстрел\nСвайп по барабану - вращение',
+            font_size='14sp',
+            color=(1, 1, 1, 1),
+            halign='center',
+            pos_hint={'center_x': 0.5, 'top': 0.85},
+            size_hint=(None, None),
+            size=(500, 60)
+        )
+
         # Счетчик выстрелов
         self.shot_counter = Label(
             text='Выстрелов: 0',
@@ -414,6 +515,7 @@ class RusRouletteScreen(BaseGameScreen):
         )
 
         self.layout.add_widget(title)
+        self.layout.add_widget(self.result_label)
         self.layout.add_widget(self.shot_counter)
 
     def show_chamber_modal(self, instance):
@@ -513,20 +615,10 @@ class RusRouletteScreen(BaseGameScreen):
         if self.bullet_count_label:
             self.bullet_count_label.text = str(self.total_bullets)
 
-        # Обновляем цвет иконки в зависимости от количества патронов
-        if self.bullet_icon:
-            if self.total_bullets == 0:
-                self.bullet_icon.background_color = (0.3, 0.3, 0.3, 0.7)
-                self.bullet_icon.text = '○'
-            elif self.total_bullets >= 4:
-                self.bullet_icon.background_color = (0.8, 0.1, 0.1, 0.9)
-                self.bullet_icon.text = '💀'
-            else:
-                self.bullet_icon.background_color = (0.8, 0.5, 0.1, 0.9)
-                self.bullet_icon.text = '💀'
-
         if self.shot_counter:
             self.shot_counter.text = f'Выстрелов: {self.shots_fired}'
+
+        print(f"🔫 Патронов: {self.total_bullets}, Выстрелов: {self.shots_fired}")  # Отладка
 
     def pull_trigger(self):
         """Спуск курка (вызывается при тапе по курку)"""
@@ -544,6 +636,14 @@ class RusRouletteScreen(BaseGameScreen):
 
     def check_shot_result(self):
         """Проверяет результат выстрела"""
+        # Проверяем, что есть слоты
+        if not self.bullet_slots or self.current_slot >= len(self.bullet_slots):
+            # Если слотов нет, просто показываем сообщение
+            self.result_label.text = 'Ошибка: нет данных о патронах'
+            self.result_label.color = (1, 0, 0, 1)
+            Clock.schedule_once(self.reset_result_text, 2.0)
+            return
+
         current_slot = self.bullet_slots[self.current_slot]
 
         if current_slot.has_bullet:
@@ -571,7 +671,7 @@ class RusRouletteScreen(BaseGameScreen):
         self.current_slot = (self.current_slot + 1) % 6
 
         self.update_bullet_counter()
-        self.update_current_slot()
+        # self.update_current_slot()
 
         # Сброс текста через 2 секунды
         Clock.schedule_once(self.reset_result_text, 2.0)
