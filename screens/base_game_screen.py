@@ -5,6 +5,7 @@ from kivy.clock import Clock
 from kivy.animation import Animation
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.image import Image as KivyImage
+from sound_manager import SoundManager  # Импортируем SoundManager
 
 
 class BaseGameScreen(Screen):
@@ -12,6 +13,9 @@ class BaseGameScreen(Screen):
 
     background_image = StringProperty('')
     sound_file = StringProperty('')
+
+    # Флаг для определения, является ли экран игровым (нужно для регулировки громкости)
+    is_game_screen = True  # По умолчанию True для игровых экранов
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -26,6 +30,9 @@ class BaseGameScreen(Screen):
         # Кнопка назад
         self.back_button = None
 
+        # Ссылка на глобальный SoundManager
+        self.sound_manager = SoundManager()
+
         self.add_widget(self.layout)
         self.bind(size=self._on_size_change)
 
@@ -39,9 +46,24 @@ class BaseGameScreen(Screen):
         self.setup_sound()
         self.create_back_button()
 
+        # Если это игровой экран, плавно убавляем фоновую музыку
+        if self.is_game_screen:
+            self.sound_manager.fade_to(0.05, duration=1.0)  # Убавляем до 5% за 1 секунду
+
     def on_leave(self):
         """При выходе с экрана"""
         self.stop_sound()
+
+        # Если это игровой экран, возвращаем громкость при выходе
+        if self.is_game_screen:
+            self.sound_manager.fade_to(1.0, duration=1.0)  # Возвращаем до 100% за 1 секунду
+
+    def go_to_menu(self):
+        """Возврат в меню"""
+        self.stop_sound()
+        # Возвращаем громкость перед переходом в меню
+        self.sound_manager.fade_to(1.0, duration=0.5)
+        self.manager.current = 'menu'
 
     def setup_background(self):
         """Настраивает фон"""
@@ -99,12 +121,6 @@ class BaseGameScreen(Screen):
 
         self.back_button = back_btn
         self.layout.add_widget(back_btn)
-
-    def go_to_menu(self):
-        """Возврат в меню"""
-        self.stop_sound()
-        self.manager.current = 'menu'
-
 
     def start_game(self):
         pass

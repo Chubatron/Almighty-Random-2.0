@@ -1,28 +1,31 @@
+import random
+
 from kivy.uix.image import Image
 from kivy.uix.behaviors import ButtonBehavior
-from kivy.uix.screenmanager import Screen
 from kivy.uix.floatlayout import FloatLayout
-from kivy.properties import BooleanProperty, NumericProperty, StringProperty
 from kivy.clock import Clock
 from kivy.animation import Animation
 from kivy.uix.image import Image as KivyImage
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.modalview import ModalView
-from kivy.graphics import Color, Rectangle, Line
+from kivy.graphics import Color, Line
 from kivy.vector import Vector
 from kivy.core.window import Window
-import random
-
+from kivy.core.audio import SoundLoader
+from sound_manager import SoundManager
 from screens.base_game_screen import BaseGameScreen
 
+
 class BulletSprite(KivyImage):
-    """Спрайт патрона в слоте барабана с поворотом"""
+    """Спрайт патрона в слоте барабана с поворотом и случайным изображением"""
 
     def __init__(self, slot_number=0, **kwargs):
         super().__init__(**kwargs)
         self.slot_number = slot_number
-        self.source = 'assets/images/guns/Bullet_back.png'  # Тот же файл!
+        # Выбираем случайное изображение от 0 до 5
+        random_index = random.randint(0, 10)
+        self.source = f'assets/images/guns/Bullet_back_{random_index}.png'
         self.size_hint = (None, None)
         self.size = (100, 100)
         self.allow_stretch = True
@@ -30,18 +33,17 @@ class BulletSprite(KivyImage):
         self.opacity = 0
         self.rotation = random.uniform(0, 360)
         self.is_loaded = False
+        self.chamber_sound = None
 
     def set_loaded(self, loaded):
         self.is_loaded = loaded
         self.opacity = 1 if loaded else 0
 
-
 class BulletIcon(ButtonBehavior, Image):
-    """Иконка патрона в правом верхнем углу - ТОЛЬКО ИЗ ФАЙЛА"""
+    """Иконка патрона в правом верхнем углу"""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # ЕДИНСТВЕННЫЙ файл - тот что есть!
         self.source = 'assets/images/guns/Drum_1024x1024.png'
         self.size_hint = (None, None)
         self.size = (60, 60)
@@ -123,7 +125,7 @@ class ChamberModal(ModalView):
     def __init__(self, main_screen, **kwargs):
         super().__init__(**kwargs)
         self.main_screen = main_screen
-        self.background_color = (0, 0, 0, 0.85)
+        self.background_color = (0, 0, 0, 0)  # УБРАН черный фон!
         self.auto_dismiss = True
         self.size_hint = (0.9, 0.9)
         self.pos_hint = {'center_x': 0.5, 'center_y': 0.5}
@@ -138,11 +140,7 @@ class ChamberModal(ModalView):
 
     def create_chamber_ui(self, dt=None):
         """Создает интерфейс модального окна барабана"""
-        # Затемненный фон
-        with self.layout.canvas.before:
-            Color(0, 0, 0, 0.85)
-            self.bg_rect = Rectangle(pos=self.layout.pos, size=self.layout.size)
-        self.layout.bind(pos=self.update_bg, size=self.update_bg)
+        # УБРАН затемненный фон!
 
         # === 1. БАРАБАН (фон) ===
         drum_size = min(self.layout.width, self.layout.height) * 0.7
@@ -157,16 +155,12 @@ class ChamberModal(ModalView):
             )
             self.layout.add_widget(drum_img)
         except Exception as e:
-            print(f"Не удалось загрузить изображение барабана: {e}")
             # Рисуем круг-заглушку
             with self.layout.canvas:
                 Color(0.3, 0.3, 0.3, 0.8)
                 Line(circle=(self.layout.width * 0.5, self.layout.height * 0.6,
                              drum_size / 2), width=3)
-                Color(0.2, 0.2, 0.2, 0.5)
-                Rectangle(pos=(self.layout.width * 0.5 - drum_size / 2,
-                               self.layout.height * 0.6 - drum_size / 2),
-                          size=(drum_size, drum_size))
+
         # Координаты в процентах от размера окна - ПОВЕРНУТЫ на 1/12 (30°)
         slot_positions = [
             (0.66, 0.77),  # слот 1 - верх
@@ -177,48 +171,6 @@ class ChamberModal(ModalView):
             (0.445, 0.765),  # слот 6 - верх-лево
         ]
 
-        # === ВРЕМЕННАЯ ПОДСВЕТКА ПОЗИЦИЙ ДЛЯ ОТЛАДКИ ===
-        for i, (rel_x, rel_y) in enumerate(slot_positions):
-            x = self.layout.width * rel_x
-            y = self.layout.height * rel_y
-
-            # КРАСНЫЙ КРУГ - позиция патрона
-            with self.layout.canvas:
-                Color(1, 0, 0, 0.5)  # Полупрозрачный красный
-                Line(circle=(x, y, 25), width=2)  # Круг диаметром 50px
-                Color(1, 0, 0, 0.3)
-                Rectangle(pos=(x - 2, y - 2), size=(4, 4))  # Центральная точка
-
-            # ЖЕЛТЫЙ КВАДРАТ - зона касания
-            with self.layout.canvas:
-                Color(1, 1, 0, 0.2)  # Полупрозрачный желтый
-                Line(rectangle=(x - 35, y - 35, 70, 70), width=1)
-
-            # ТЕКСТ С НОМЕРОМ СЛОТА
-            num_label = Label(
-                text=str(i + 1),
-                font_size='16sp',
-                bold=True,
-                color=(1, 1, 1, 1),
-                pos=(x - 10, y + 30),
-                size_hint=(None, None),
-                size=(20, 20),
-                outline_color=(0, 0, 0, 1),
-                outline_width=2
-            )
-            self.layout.add_widget(num_label)
-
-            # КООРДИНАТЫ В ПРОЦЕНТАХ
-            coord_label = Label(
-                text=f'({rel_x}, {rel_y})',
-                font_size='10sp',
-                color=(0, 1, 1, 1),
-                pos=(x - 30, y - 45),
-                size_hint=(None, None),
-                size=(60, 20)
-            )
-            self.layout.add_widget(coord_label)
-
         # Создаем патроны и зоны касания
         for i, (rel_x, rel_y) in enumerate(slot_positions):
             # Конвертируем относительные координаты в абсолютные
@@ -228,7 +180,7 @@ class ChamberModal(ModalView):
             # === СПРАЙТ ПАТРОНА (сверху) ===
             bullet = BulletSprite(
                 slot_number=i,
-                pos=(x - 50, y - 50)  # ИСПРАВЛЕНО: 100/2 = 50
+                pos=(x - 50, y - 50)  # 100/2 = 50
             )
 
             # Копируем состояние из основного экрана
@@ -241,76 +193,39 @@ class ChamberModal(ModalView):
             # === ЗОНА КАСАНИЯ (невидимая кнопка) ===
             slot_btn = Button(
                 size_hint=(None, None),
-                size=(70, 70),  # Больше патрона для удобства
+                size=(70, 70),
                 pos=(x - 35, y - 35),
                 background_normal='',
-                background_color=(0, 0, 0, 0),  # Полностью прозрачная
-                opacity=0.01  # Почти невидимая, но кликабельная
+                background_color=(0, 0, 0, 0),
+                opacity=0.01
             )
             slot_btn.bind(on_release=lambda instance, idx=i: self.toggle_slot(idx))
 
             self.slot_buttons.append(slot_btn)
             self.layout.add_widget(slot_btn)
 
-            # === НОМЕР СЛОТА (опционально) ===
-            if False:  # Включи если нужны номера
-                num_label = Label(
-                    text=str(i + 1),
-                    font_size='14sp',
-                    color=(1, 1, 1, 0.5),
-                    pos=(x - 5, y + 30),
-                    size_hint=(None, None),
-                    size=(20, 20)
-                )
-                self.layout.add_widget(num_label)
-
-        # === КНОПКА ГОТОВО ===
-        done_btn = Button(
-            text='ГОТОВО',
+        # === КНОПКА LOAD (возврат в основной экран) ===
+        load_btn = Button(
+            text='LOAD',
             font_size='20sp',
             bold=True,
             size_hint=(None, None),
-            size=(200, 60),
+            size=(150, 60),
             pos_hint={'center_x': 0.5, 'y': 0.05},
-            background_color=(0.2, 0.6, 0.2, 0.9),
+            background_color=(0.3, 0.3, 0.3, 0.8),
             background_normal='',
             color=(1, 1, 1, 1)
         )
-        done_btn.bind(on_release=self.close_modal)
-        self.layout.add_widget(done_btn)
-
-        # === ЗАГОЛОВОК ===
-        title = Label(
-            text='ЗАРЯДКА БАРАБАНА',
-            font_size='18sp',
-            bold=True,
-            color=(1, 0.3, 0.3, 1),
-            pos_hint={'center_x': 0.5, 'top': 0.95},
-            size_hint=(None, None),
-            size=(300, 40)
-        )
-        self.layout.add_widget(title)
-
-        # === ИНСТРУКЦИЯ ===
-        instruction = Label(
-            text='Нажми на патрон чтобы зарядить/разрядить',
-            font_size='14sp',
-            color=(0.8, 0.8, 0.8, 0.9),
-            pos_hint={'center_x': 0.5, 'top': 0.88},
-            size_hint=(None, None),
-            size=(400, 30)
-        )
-        self.layout.add_widget(instruction)
+        load_btn.bind(on_release=self.close_modal)
+        self.layout.add_widget(load_btn)
 
     def toggle_slot(self, slot_index):
         """Переключает патрон в слоте"""
         bullet = self.bullet_sprites[slot_index]
-
-        # Переключаем состояние
         new_state = not bullet.is_loaded
         bullet.set_loaded(new_state)
 
-        # Визуальная обратная связь - кратковременное подсвечивание
+        # Визуальная обратная связь
         btn = self.slot_buttons[slot_index]
         original_color = btn.background_color
         btn.background_color = (1, 1, 1, 0.2)
@@ -336,15 +251,13 @@ class ChamberModal(ModalView):
 
     def update_bg(self, instance, value):
         """Обновляет фон"""
-        self.bg_rect.pos = instance.pos
-        self.bg_rect.size = instance.size
+        pass  # Фон больше не нужен
 
 
 class RusRouletteScreen(BaseGameScreen):
     """Реалистичная русская рулетка с жестовым управлением"""
 
     background_image = 'assets/backgrounds/rus_roulette_bg_1024x1024.jpg'
-    # sound_file = 'assets/sounds/football_bounce.wav'
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -372,12 +285,36 @@ class RusRouletteScreen(BaseGameScreen):
         # Модальное окно
         self.chamber_modal = None
 
+        # НОВОЕ: прямоугольник для анимации барабана
+        self.chamber_highlight = None
+
+        # SoundManager для управления фоновой музыкой - ДОБАВИТЬ ЭТО
+        self.sound_manager = SoundManager()
+
+        self.chamber_sound = None
+
         self.bind(size=self._update_positions)
+
+    def play_chamber_sound(self):
+        """Воспроизводит звук открытия барабана"""
+        try:
+            if not self.chamber_sound:
+                self.chamber_sound = SoundLoader.load('assets/sounds/Roulette/chamber_out.ogg')
+
+            if self.chamber_sound:
+                if self.chamber_sound.state == 'play':
+                    self.chamber_sound.stop()
+                self.chamber_sound.play()
+        except Exception as e:
+            print(f"Ошибка при воспроизведении звука: {e}")
 
     def on_enter(self):
         """При входе на экран"""
-        super().on_enter()
-        Clock.schedule_once(self.create_game_screen, 0.1)
+        # Убавляем фоновую музыку до 5% за 1 секунду - ДОБАВИТЬ ЭТО
+        self.sound_manager.fade_to(0.05, duration=1.0)
+
+        # Сбрасываем игру при входе
+        self.start_game()
 
     def create_game_screen(self, dt=None):
         """Создает игровой экран"""
@@ -390,17 +327,105 @@ class RusRouletteScreen(BaseGameScreen):
         # Сначала создаем пистолет (нижний слой)
         self.create_gun()
 
-        # Затем барабанные слоты (если нужны)
+        self.create_back_button()
+
+        # Затем барабанные слоты (для хранения состояния)
         self.create_bullet_chamber()
 
         # Затем информационные надписи (средний слой)
         self.create_info_labels()
 
+        # НОВОЕ: создаем прямоугольник для анимации барабана (поверх пистолета)
+        self.create_chamber_highlight()
+
         # Иконка патрона должна быть ПОСЛЕДНЕЙ (верхний слой)
         self.create_bullet_icon()
 
+        # Инициализируем все слоты как пустые
+        self.initialize_empty_chamber()
+
         # Обновляем состояние
         self.update_bullet_counter()
+        self.update_current_slot()
+
+    def create_chamber_highlight(self):
+        """Создает прямоугольник для анимации барабана"""
+        from kivy.uix.widget import Widget
+        from kivy.graphics import Color, Rectangle
+
+        self.chamber_highlight = Widget()
+        self.chamber_highlight.size_hint = (None, None)
+        self.chamber_highlight.size = (110, 117)  # РАЗМЕР ПРЯМОУГОЛЬНИКА
+
+        # Позиция по умолчанию - центр пистолета
+        # Вы сможете отредактировать эти координаты
+        self.chamber_highlight.pos = (Window.width * 0.54, Window.height * 0.475)  # ПОЗИЦИЯ
+
+        # Рисуем прямоугольник с прозрачностью
+        with self.chamber_highlight.canvas:
+            Color(0.1, 0.1, 0.1, 0.5)  # Серый
+            self.highlight_rect = Rectangle(
+                pos=self.chamber_highlight.pos,
+                size=self.chamber_highlight.size
+            )
+
+        # По умолчанию скрыт
+        self.chamber_highlight.opacity = 0
+        self.layout.add_widget(self.chamber_highlight)
+
+    def spin_chamber(self):
+        """Вращение барабана (вызывается при свайпе)"""
+        # Сохраняем старую позицию для анимации
+        old_slot = self.current_slot
+        self.current_slot = random.randint(0, 5)
+        self.animate_chamber_highlight()
+
+    def animate_chamber_highlight(self):
+        """Анимация прямоугольника барабана (мерцание)"""
+        if not self.chamber_highlight:
+            return
+
+        # Сначала убеждаемся, что пистолет НЕ анимируется
+        if hasattr(self, 'gun_image') and self.gun_image:
+            # Отменяем все текущие анимации пистолета
+            Animation.cancel_all(self.gun_image)
+            # Возвращаем нормальную прозрачность
+            self.gun_image.opacity = 1
+
+        # Показываем прямоугольник
+        self.chamber_highlight.opacity = 1
+
+        # МЕДЛЕННОЕ МЕРЦАНИЕ - увеличиваем duration
+        # Было: duration=0.15 - теперь duration=0.4 (медленнее)
+        anim = Animation(opacity=0.2, duration=0.4) + Animation(opacity=0.9, duration=0.4)
+        anim.repeat = True
+        anim.start(self.chamber_highlight)
+
+        # УВЕЛИЧИВАЕМ ПРОДОЛЖИТЕЛЬНОСТЬ - было 1.5 секунды, теперь 3 секунды
+        Clock.schedule_once(lambda dt: self.stop_chamber_animation(anim), 5.0)
+
+    def stop_chamber_animation(self, anim):
+        """Останавливает анимацию барабана"""
+        if self.chamber_highlight:
+            anim.stop(self.chamber_highlight)
+            self.chamber_highlight.opacity = 0  # Скрываем прямоугольник
+        self.finish_spin(0)
+
+    def finish_spin(self, dt):
+        """Завершение вращения"""
+        self.result_label.text = f'Барабан остановлен'
+        self.result_label.color = (1, 1, 1, 1)
+        self.update_current_slot()
+
+    def initialize_empty_chamber(self):
+        """Инициализирует все слоты как пустые"""
+        for slot in self.bullet_slots:
+            slot.has_bullet = False
+            slot.update_appearance()
+
+        # Устанавливаем текущий слот (первый)
+        self.current_slot = 0
+        self.total_bullets = 0
 
     def create_bullet_icon(self):
         """Создает иконку патрона в правом верхнем углу"""
@@ -413,18 +438,7 @@ class RusRouletteScreen(BaseGameScreen):
         self.bullet_icon.bind(on_release=self.show_chamber_modal)
         self.layout.add_widget(self.bullet_icon)
 
-        # Счетчик патронов рядом с иконкой
-        self.bullet_count_label = Label(
-            text='0',
-            font_size='16sp',
-            bold=True,
-            color=(1, 1, 1, 1),
-            pos_hint={'right': 0.87, 'top': 0.95},
-            size_hint=(None, None),
-            size=(30, 30)
-        )
-        self.layout.add_widget(self.bullet_count_label)
-
+        # Счетчик патронов рядом с иконкой - УДАЛЕН!
     def create_gun(self):
         """Создает изображение пистолета с жестовым управлением"""
         if self.gun_image:
@@ -445,7 +459,7 @@ class RusRouletteScreen(BaseGameScreen):
                 font_size='20sp',
                 size_hint=(1, 1),
                 pos_hint={'center_x': 0.5, 'center_y': 0.5},
-                background_color=(0.3, 0.3, 0.3, 0.7),
+                background_color=(0.3, 0.3, 0.3, 1),
                 color=(1, 1, 1, 1)
             )
 
@@ -478,8 +492,6 @@ class RusRouletteScreen(BaseGameScreen):
             self.bullet_slots.append(slot)
             self.layout.add_widget(slot)
 
-        print(f"✅ Создано 6 слотов для патронов")
-
     def create_info_labels(self):
         """Создает информационные надписи"""
         # Заголовок
@@ -488,14 +500,15 @@ class RusRouletteScreen(BaseGameScreen):
             font_size='22sp',
             bold=True,
             color=(1, 0.2, 0.2, 1),
-            pos_hint={'center_x': 0.5, 'top': 0.92},
+            pos_hint={'center_x': 0.5, 'top': 1},
             size_hint=(None, None),
             size=(450, 50)
         )
+        self.layout.add_widget(title)
 
-        # Информация о состоянии
+        # ВЕРНУЛИ result_label - он нужен для отображения состояния!
         self.result_label = Label(
-            text='Тап по курку - выстрел\nСвайп по барабану - вращение',
+            text='',
             font_size='14sp',
             color=(1, 1, 1, 1),
             halign='center',
@@ -503,23 +516,18 @@ class RusRouletteScreen(BaseGameScreen):
             size_hint=(None, None),
             size=(500, 60)
         )
-
-        # Счетчик выстрелов
-        self.shot_counter = Label(
-            text='Выстрелов: 0',
-            font_size='16sp',
-            color=(1, 1, 1, 1),
-            pos_hint={'center_x': 0.5, 'y': 0.1},
-            size_hint=(None, None),
-            size=(150, 40)
-        )
-
-        self.layout.add_widget(title)
         self.layout.add_widget(self.result_label)
-        self.layout.add_widget(self.shot_counter)
+
+    def update_current_slot(self):
+        """Обновляет подсветку текущего слота"""
+        for i, slot in enumerate(self.bullet_slots):
+            slot.set_current(i == self.current_slot)
 
     def show_chamber_modal(self, instance):
         """Показывает модальное окно барабана для зарядки"""
+        # Воспроизводим звук открытия барабана
+        self.play_chamber_sound()  # Звук при открытии
+
         # Эффект затемнения
         self.chamber_modal = ChamberModal(self)
         self.chamber_modal.open()
@@ -538,32 +546,32 @@ class RusRouletteScreen(BaseGameScreen):
         gun_pos = self.gun_image.pos
         gun_size = self.gun_image.size
 
-        # Зона курка (правая верхняя часть)
+        # === ЗОНА КУРКА (центр-вниз) ===
         trigger_zone = (
-            gun_pos[0] + gun_size[0] * 0.7,  # 70% справа
-            gun_pos[1] + gun_size[1] * 0.7,  # 70% сверху
-            gun_size[0] * 0.3,  # 30% ширины
-            gun_size[1] * 0.3  # 30% высоты
+            gun_pos[0] + gun_size[0] * 0.4,  # 40% слева
+            gun_pos[1] + gun_size[1] * 0.1,  # 10% сверху (внизу)
+            gun_size[0] * 0.2,  # 20% ширины
+            gun_size[1] * 0.2  # 20% высоты
         )
 
-        # Зона барабана (центр левой части)
+        # === ЗОНА БАРАБАНА (весь центр, от левого края до правого) ===
         chamber_zone = (
-            gun_pos[0] + gun_size[0] * 0.15,  # 15% слева
-            gun_pos[1] + gun_size[1] * 0.4,  # 40% сверху
-            gun_size[0] * 0.3,  # 30% ширины
+            gun_pos[0] + gun_size[0] * 0.1,  # 10% слева
+            gun_pos[1] + gun_size[1] * 0.3,  # 30% сверху
+            gun_size[0] * 0.8,  # 80% ширины (почти весь)
             gun_size[1] * 0.4  # 40% высоты
         )
 
         # Проверяем, в какой зоне касание
         tx, ty = touch.pos
 
-        # Если тап по курку
+        # Если тап по курку (центр-вниз)
         if (trigger_zone[0] <= tx <= trigger_zone[0] + trigger_zone[2] and
                 trigger_zone[1] <= ty <= trigger_zone[1] + trigger_zone[3]):
             self.pull_trigger()
             return True
 
-        # Если касание в зоне барабана
+        # Если касание в зоне барабана (весь центр)
         elif (chamber_zone[0] <= tx <= chamber_zone[0] + chamber_zone[2] and
               chamber_zone[1] <= ty <= chamber_zone[1] + chamber_zone[3]):
             self.drag_start_pos = touch.pos
@@ -612,27 +620,30 @@ class RusRouletteScreen(BaseGameScreen):
     def update_bullet_counter(self):
         """Обновляет счетчик патронов"""
         self.total_bullets = sum(1 for s in self.bullet_slots if s.has_bullet)
-        if self.bullet_count_label:
-            self.bullet_count_label.text = str(self.total_bullets)
-
-        if self.shot_counter:
-            self.shot_counter.text = f'Выстрелов: {self.shots_fired}'
-
-        print(f"🔫 Патронов: {self.total_bullets}, Выстрелов: {self.shots_fired}")  # Отладка
 
     def pull_trigger(self):
         """Спуск курка (вызывается при тапе по курку)"""
-        # Визуальная обратная связь - анимация курка
-        self.result_label.text = '...'
-        self.result_label.color = (1, 1, 0, 1)
+        # self.result_label.text = '...'
+        # self.result_label.color = (1, 1, 0, 1)
 
-        # Анимация нажатия курка
-        anim = Animation(pos_hint={'center_x': 0.505, 'center_y': 0.545}, duration=0.05)
-        anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.55}, duration=0.1)
-        anim.start(self.gun_image)
+        current_slot = self.bullet_slots[self.current_slot]
 
-        # Проверяем через 1 секунду
-        Clock.schedule_once(lambda dt: self.check_shot_result(), 1.0)
+        if current_slot.has_bullet:
+            # ЗАРЯЖЕН - ДВОЙНАЯ ТРЯСКА (0.4 сек)
+            anim = Animation(pos_hint={'center_x': 0.52, 'center_y': 0.53}, duration=0.05)
+            anim += Animation(pos_hint={'center_x': 0.48, 'center_y': 0.57}, duration=0.05)
+            anim += Animation(pos_hint={'center_x': 0.52, 'center_y': 0.53}, duration=0.05)
+            anim += Animation(pos_hint={'center_x': 0.48, 'center_y': 0.57}, duration=0.05)
+            anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.55}, duration=0.05)
+            anim.start(self.gun_image)
+            Clock.schedule_once(lambda dt: self.check_shot_result(), 0.3)
+        else:
+            # ПУСТОЙ - МИНИМАЛЬНАЯ ТРЯСКА (0.15 сек)
+            anim = Animation(pos_hint={'center_x': 0.51, 'center_y': 0.51}, duration=0.03)
+            anim += Animation(pos_hint={'center_x': 0.49, 'center_y': 0.5}, duration=0.03)
+            anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.49}, duration=0.03)
+            anim.start(self.gun_image)
+            Clock.schedule_once(lambda dt: self.check_shot_result(), 0.15)
 
     def check_shot_result(self):
         """Проверяет результат выстрела"""
@@ -647,10 +658,6 @@ class RusRouletteScreen(BaseGameScreen):
         current_slot = self.bullet_slots[self.current_slot]
 
         if current_slot.has_bullet:
-            # ВЫСТРЕЛ!
-            self.result_label.text = 'БАХ! ВЫСТРЕЛ!'
-            self.result_label.color = (1, 0, 0, 1)
-
             # Анимация отдачи
             anim = Animation(pos_hint={'center_x': 0.52, 'center_y': 0.55}, duration=0.1)
             anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.55}, duration=0.1)
@@ -662,42 +669,10 @@ class RusRouletteScreen(BaseGameScreen):
             self.total_bullets -= 1
             self.update_bullet_counter()
 
-        else:
-            # Холостой выстрел
-            self.result_label.text = 'Щелк! Холостой.'
-            self.result_label.color = (0, 1, 0, 1)
-
         self.shots_fired += 1
         self.current_slot = (self.current_slot + 1) % 6
 
         self.update_bullet_counter()
-        # self.update_current_slot()
-
-        # Сброс текста через 2 секунды
-        Clock.schedule_once(self.reset_result_text, 2.0)
-
-    def spin_chamber(self):
-        """Вращение барабана (вызывается при свайпе)"""
-        # Сохраняем старую позицию для анимации
-        old_slot = self.current_slot
-        self.current_slot = random.randint(0, 5)
-
-        # Анимация вращения
-        rotations = random.randint(2, 5)
-        anim = Animation(rotation=self.gun_rotation + 360 * rotations, duration=1.0)
-        anim.start(self.gun_image)
-        self.gun_rotation += 360 * rotations
-
-        self.result_label.text = f'Барабан вращается...'
-        self.result_label.color = (1, 1, 0, 1)
-
-        # Через 1.5 секунды готово
-        Clock.schedule_once(self.finish_spin, 1.5)
-
-    def finish_spin(self, dt):
-        """Завершение вращения"""
-        self.result_label.text = f'Барабан остановлен'
-        self.result_label.color = (1, 1, 1, 1)
 
         # Нормализуем вращение
         self.gun_rotation = self.gun_rotation % 360
@@ -705,10 +680,10 @@ class RusRouletteScreen(BaseGameScreen):
 
         self.update_current_slot()
 
-    def reset_result_text(self, dt):
-        """Сбрасывает текст результата"""
-        self.result_label.text = 'Готов к следующему выстрелу'
-        self.result_label.color = (1, 1, 1, 1)
+    # def reset_result_text(self, dt):
+    #     """Сбрасывает текст результата"""
+    #     self.result_label.text = 'Готов к следующему выстрелу'
+    #     self.result_label.color = (1, 1, 1, 1)
 
     def start_game(self):
         """Начать игру"""
@@ -731,5 +706,34 @@ class RusRouletteScreen(BaseGameScreen):
         if self.gun_image:
             self.gun_image.pos_hint = {'center_x': 0.5, 'center_y': 0.55}
 
+        # НОВОЕ: обновляем позицию прямоугольника при изменении размера окна
+        if self.chamber_highlight:
+            # Автоматически подстраиваем позицию под размер окна
+            # НО ВЫ МОЖЕТЕ ОТРЕДАКТИРОВАТЬ ЭТИ ЗНАЧЕНИЯ!
+            self.chamber_highlight.pos = (Window.width * 0.43, Window.height * 0.45)
+            if hasattr(self, 'highlight_rect'):
+                self.highlight_rect.pos = self.chamber_highlight.pos
+
         if self.bullet_slots:
             Clock.schedule_once(lambda dt: self.create_bullet_chamber(), 0.1)
+
+    def on_leave(self):
+        """При выходе с экрана"""
+        # Возвращаем громкость фоновой музыки до 100% - ДОБАВИТЬ ЭТО
+        self.sound_manager.fade_to(1.0, duration=0.5)
+
+        # Очищаем звук барабана
+        if hasattr(self, 'chamber_sound') and self.chamber_sound:
+            self.chamber_sound.stop()
+            self.chamber_sound = None
+
+        # Вызываем родительский метод
+        super().on_leave()
+
+    def go_to_menu(self):
+        """Возврат в меню с восстановлением громкости"""
+        # Возвращаем громкость фоновой музыки до 100%
+        self.sound_manager.fade_to(1.0, duration=0.5)
+
+        # Вызываем родительский метод для перехода
+        super().go_to_menu()

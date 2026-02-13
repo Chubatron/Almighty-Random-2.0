@@ -87,3 +87,33 @@ class SoundManager:
     @property
     def is_playing(self):
         return self._sound and self._sound.state == 'play'
+
+    # sound_manager.py - добавьте этот метод в класс SoundManager
+
+    # sound_manager.py - добавьте этот метод в класс SoundManager
+
+    def fade_to(self, target_volume, duration=1.0, callback=None):
+        """Плавно изменяет громкость до target_volume за duration секунд"""
+        if not self._sound:
+            if callback:
+                callback()
+            return
+
+        start_volume = self._sound.volume
+        step_count = int(duration * 20)  # 20 шагов в секунду для плавности
+        step_duration = duration / step_count if step_count > 0 else 0
+        volume_step = (target_volume - start_volume) / step_count if step_count > 0 else 0
+
+        def update_volume(step):
+            nonlocal step_count
+            if step <= step_count:
+                new_volume = start_volume + volume_step * step
+                self._sound.volume = max(0.0, min(1.0, new_volume))
+                Clock.schedule_once(lambda dt: update_volume(step + 1), step_duration)
+            else:
+                # Убеждаемся, что достигли точного целевого значения
+                self._sound.volume = target_volume
+                if callback:
+                    callback()
+
+        update_volume(1)

@@ -1,3 +1,4 @@
+# screens/intermediate_roulette.py - пример обновления
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 from kivy.uix.image import Image
@@ -5,26 +6,13 @@ from kivy.animation import Animation
 from kivy.clock import Clock
 from animated_background import AnimatedBackground
 from components.icon_button import IconButton
-from screens.menu_screen import MainMenuScreen
+from screens.intermediate_base_screen import IntermediateScreen  # Новый импорт
 
-class IntermediateRoulette(MainMenuScreen):
+class IntermediateRoulette(IntermediateScreen):  # Наследуемся от IntermediateScreen
     def __init__(self, **kwargs):
-        # Сначала очистить все виджеты
-        self.clear_widgets()
+        super().__init__(**kwargs)  # Вызовет конструктор IntermediateScreen
 
-        # Затем вызвать конструктор родителя
-        super().__init__(**kwargs)
-
-        layout = FloatLayout()
-
-        # Удаляем панель управления после инициализации родителя
-        # Найдите и удалите ControlPanel
-        for child in self.children[:]:  # Копируем список
-            print(child)
-            if hasattr(child, '__class__') and child.__class__.__name__ == 'FloatLayout':
-                self.remove_widget(child)
-                break
-
+        layout = self.layout  # Используем layout из родителя
 
         # Анимированный фон
         self.background = AnimatedBackground()
@@ -32,7 +20,6 @@ class IntermediateRoulette(MainMenuScreen):
 
         # Статический фон (полупрозрачный)
         bg = Image(
-            # source='assets/backgrounds/main_menu_bg_black.jpg',
             source='assets/backgrounds/indigo_bg.png',
             allow_stretch=True,
             keep_ratio=True,
@@ -60,7 +47,6 @@ class IntermediateRoulette(MainMenuScreen):
         # Создаем кнопки
         self.create_buttons(layout)
         self.add_back_button(layout)
-        self.add_widget(layout)
 
     def create_buttons(self, layout):
         """Создает кнопки видов спорта"""
@@ -91,14 +77,10 @@ class IntermediateRoulette(MainMenuScreen):
 
             layout.add_widget(btn)
 
-
-    def go_to_menu(self, instance):
-        self.manager.current = 'menu'
-
     def change_to_game(self, instance):
         """Переход к игровому экрану"""
-        print(f"Перехрд на {instance.sport}")
-        self.manager.current = instance.sport
+        print(f"Переход на {instance.sport}")
+        self.go_to_game(instance.sport)  # Используем метод из родителя
         self.manager.get_screen(instance.sport).start_game()
 
     def create_back_button(self, layout):
@@ -110,7 +92,7 @@ class IntermediateRoulette(MainMenuScreen):
             pass
 
         back_btn = BackImageButton(
-            source='assets/images/buttons/Orange_back_to_menu_button.png',  # Укажите путь к вашей картинке
+            source='assets/images/buttons/Orange_back_to_menu_button.png',
             size_hint=(None, None),
             size=(60, 60),
             pos_hint={'x': 0.09, 'y': 0.055},
