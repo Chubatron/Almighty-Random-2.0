@@ -216,7 +216,8 @@ class ChamberModal(ModalView):
             background_normal='',
             color=(1, 1, 1, 1)
         )
-        load_btn.bind(on_release=self.close_modal)
+        # ИЗМЕНЕНИЕ: привязываем к методу с звуком
+        load_btn.bind(on_release=self.close_modal_with_sound)
         self.layout.add_widget(load_btn)
 
     def toggle_slot(self, slot_index):
@@ -224,6 +225,10 @@ class ChamberModal(ModalView):
         bullet = self.bullet_sprites[slot_index]
         new_state = not bullet.is_loaded
         bullet.set_loaded(new_state)
+
+        # Воспроизводим звук зарядки/разрядки через главный экран
+        if hasattr(self.main_screen, 'play_bullet_load_sound'):
+            self.main_screen.play_bullet_load_sound()
 
         # Визуальная обратная связь
         btn = self.slot_buttons[slot_index]
@@ -249,10 +254,18 @@ class ChamberModal(ModalView):
 
         self.dismiss()
 
+    def close_modal_with_sound(self, instance):
+        """Закрывает модальное окно с воспроизведением звука"""
+        # Воспроизводим звук через главный экран
+        if hasattr(self.main_screen, 'play_chamber_sound'):
+            self.main_screen.play_chamber_sound()
+
+        # Вызываем существующий метод close_modal для закрытия и обновления
+        self.close_modal(instance)
+
     def update_bg(self, instance, value):
         """Обновляет фон"""
         pass  # Фон больше не нужен
-
 
 class RusRouletteScreen(BaseGameScreen):
     """Реалистичная русская рулетка с жестовым управлением"""
@@ -288,12 +301,49 @@ class RusRouletteScreen(BaseGameScreen):
         # НОВОЕ: прямоугольник для анимации барабана
         self.chamber_highlight = None
 
-        # SoundManager для управления фоновой музыкой - ДОБАВИТЬ ЭТО
+        # SoundManager для управления фоновой музыкой
         self.sound_manager = SoundManager()
 
+        # Звуки
         self.chamber_sound = None
-
+        self.gun_shot_sound = None  # Звук выстрела
+        self.misfire_sound = None  # Звук осечки
+        self.bullet_load_sound = None  # Звук зарядки/разрядки патрона
+        self.revolve_sound = None
         self.bind(size=self._update_positions)
+
+    def play_revolve_sound(self):
+        """Воспроизводит звук вращения барабана"""
+        try:
+            if not self.revolve_sound:
+                self.revolve_sound = SoundLoader.load('assets/sounds/Roulette/revolve.ogg')
+                if not self.revolve_sound:
+                    print("Не удалось загрузить звук: assets/sounds/Roulette/revolve.ogg")
+                    return
+
+            if self.revolve_sound:
+                if self.revolve_sound.state == 'play':
+                    self.revolve_sound.stop()
+                self.revolve_sound.play()
+        except Exception as e:
+            print(f"Ошибка при воспроизведении звука вращения: {e}")
+
+
+    def play_bullet_load_sound(self):
+        """Воспроизводит звук зарядки/разрядки патрона"""
+        try:
+            if not self.bullet_load_sound:
+                self.bullet_load_sound = SoundLoader.load('assets/sounds/Roulette/bullet_load.ogg')
+                if not self.bullet_load_sound:
+                    print("Не удалось загрузить звук: assets/sounds/Roulette/bullet_load.ogg")
+                    return
+
+            if self.bullet_load_sound:
+                if self.bullet_load_sound.state == 'play':
+                    self.bullet_load_sound.stop()
+                self.bullet_load_sound.play()
+        except Exception as e:
+            print(f"Ошибка при воспроизведении звука зарядки: {e}")
 
     def play_chamber_sound(self):
         """Воспроизводит звук открытия барабана"""
@@ -310,7 +360,7 @@ class RusRouletteScreen(BaseGameScreen):
 
     def on_enter(self):
         """При входе на экран"""
-        # Убавляем фоновую музыку до 5% за 1 секунду - ДОБАВИТЬ ЭТО
+        # Убавляем фоновую музыку до 5% за 1 секунду
         self.sound_manager.fade_to(0.05, duration=1.0)
 
         # Сбрасываем игру при входе
@@ -358,8 +408,7 @@ class RusRouletteScreen(BaseGameScreen):
         self.chamber_highlight.size = (110, 117)  # РАЗМЕР ПРЯМОУГОЛЬНИКА
 
         # Позиция по умолчанию - центр пистолета
-        # Вы сможете отредактировать эти координаты
-        self.chamber_highlight.pos = (Window.width * 0.54, Window.height * 0.475)  # ПОЗИЦИЯ
+        self.chamber_highlight.pos = (Window.width * 0.54, Window.height * 0.47)  # ПОЗИЦИЯ
 
         # Рисуем прямоугольник с прозрачностью
         with self.chamber_highlight.canvas:
@@ -375,6 +424,9 @@ class RusRouletteScreen(BaseGameScreen):
 
     def spin_chamber(self):
         """Вращение барабана (вызывается при свайпе)"""
+        # Воспроизводим звук вращения
+        self.play_revolve_sound()
+
         # Сохраняем старую позицию для анимации
         old_slot = self.current_slot
         self.current_slot = random.randint(0, 5)
@@ -396,13 +448,12 @@ class RusRouletteScreen(BaseGameScreen):
         self.chamber_highlight.opacity = 1
 
         # МЕДЛЕННОЕ МЕРЦАНИЕ - увеличиваем duration
-        # Было: duration=0.15 - теперь duration=0.4 (медленнее)
-        anim = Animation(opacity=0.2, duration=0.4) + Animation(opacity=0.9, duration=0.4)
+        anim = Animation(opacity=0.2, duration=0.1) + Animation(opacity=0.9, duration=0.1)
         anim.repeat = True
         anim.start(self.chamber_highlight)
 
-        # УВЕЛИЧИВАЕМ ПРОДОЛЖИТЕЛЬНОСТЬ - было 1.5 секунды, теперь 3 секунды
-        Clock.schedule_once(lambda dt: self.stop_chamber_animation(anim), 5.0)
+        # УВЕЛИЧИВАЕМ ПРОДОЛЖИТЕЛЬНОСТЬ
+        Clock.schedule_once(lambda dt: self.stop_chamber_animation(anim), 0.5)
 
     def stop_chamber_animation(self, anim):
         """Останавливает анимацию барабана"""
@@ -413,7 +464,6 @@ class RusRouletteScreen(BaseGameScreen):
 
     def finish_spin(self, dt):
         """Завершение вращения"""
-        self.result_label.text = f'Барабан остановлен'
         self.result_label.color = (1, 1, 1, 1)
         self.update_current_slot()
 
@@ -438,7 +488,6 @@ class RusRouletteScreen(BaseGameScreen):
         self.bullet_icon.bind(on_release=self.show_chamber_modal)
         self.layout.add_widget(self.bullet_icon)
 
-        # Счетчик патронов рядом с иконкой - УДАЛЕН!
     def create_gun(self):
         """Создает изображение пистолета с жестовым управлением"""
         if self.gun_image:
@@ -523,6 +572,73 @@ class RusRouletteScreen(BaseGameScreen):
         for i, slot in enumerate(self.bullet_slots):
             slot.set_current(i == self.current_slot)
 
+    def play_gun_shot_sound(self):
+        """Воспроизводит звук выстрела"""
+        try:
+            if not self.gun_shot_sound:
+                self.gun_shot_sound = SoundLoader.load('assets/sounds/Roulette/gun_shot.ogg')
+                if not self.gun_shot_sound:
+                    print("Не удалось загрузить звук: assets/sounds/Roulette/gun_shot.ogg")
+                    return
+
+            if self.gun_shot_sound:
+                if self.gun_shot_sound.state == 'play':
+                    self.gun_shot_sound.stop()
+                self.gun_shot_sound.play()
+        except Exception as e:
+            print(f"Ошибка при воспроизведении звука выстрела: {e}")
+
+    def play_misfire_sound(self):
+        """Воспроизводит звук осечки"""
+        try:
+            if not self.misfire_sound:
+                self.misfire_sound = SoundLoader.load('assets/sounds/Roulette/misfire.ogg')
+                if not self.misfire_sound:
+                    print("Не удалось загрузить звук: assets/sounds/Roulette/misfire.ogg")
+                    return
+
+            if self.misfire_sound:
+                if self.misfire_sound.state == 'play':
+                    self.misfire_sound.stop()
+                self.misfire_sound.play()
+        except Exception as e:
+            print(f"Ошибка при воспроизведении звука осечки: {e}")
+
+    def check_shot_result(self):
+        """Проверяет результат выстрела"""
+        # Проверяем, что есть слоты
+        if not self.bullet_slots or self.current_slot >= len(self.bullet_slots):
+            # Если слотов нет, просто показываем сообщение
+            self.result_label.text = 'Ошибка: нет данных о патронах'
+            self.result_label.color = (1, 0, 0, 1)
+            Clock.schedule_once(self.reset_result_text, 2.0)
+            return
+
+        current_slot = self.bullet_slots[self.current_slot]
+
+        if current_slot.has_bullet:
+            # Анимация отдачи (звук уже воспроизведен в pull_trigger)
+            anim = Animation(pos_hint={'center_x': 0.52, 'center_y': 0.55}, duration=0.1)
+            anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.55}, duration=0.1)
+            anim.start(self.gun_image)
+
+            # Убираем патрон
+            current_slot.has_bullet = False
+            current_slot.update_appearance()
+            self.total_bullets -= 1
+            self.update_bullet_counter()
+
+        self.shots_fired += 1
+        self.current_slot = (self.current_slot + 1) % 6
+
+        self.update_bullet_counter()
+
+        # Нормализуем вращение
+        self.gun_rotation = self.gun_rotation % 360
+        self.gun_image.rotation = 0
+
+        self.update_current_slot()
+
     def show_chamber_modal(self, instance):
         """Показывает модальное окно барабана для зарядки"""
         # Воспроизводим звук открытия барабана
@@ -548,17 +664,17 @@ class RusRouletteScreen(BaseGameScreen):
 
         # === ЗОНА КУРКА (центр-вниз) ===
         trigger_zone = (
-            gun_pos[0] + gun_size[0] * 0.4,  # 40% слева
-            gun_pos[1] + gun_size[1] * 0.1,  # 10% сверху (внизу)
-            gun_size[0] * 0.2,  # 20% ширины
-            gun_size[1] * 0.2  # 20% высоты
+            gun_pos[0] + gun_size[0] * 0.1,  # 30% слева
+            gun_pos[1] + gun_size[1] * 0.05,  # 5% сверху (внизу)
+            gun_size[0] * 1,  # 90% ширины
+            gun_size[1] * 0.4  # 30% высоты
         )
 
-        # === ЗОНА БАРАБАНА (весь центр, от левого края до правого) ===
+        # === ЗОНА БАРАБАНА (весь центр) ===
         chamber_zone = (
             gun_pos[0] + gun_size[0] * 0.1,  # 10% слева
             gun_pos[1] + gun_size[1] * 0.3,  # 30% сверху
-            gun_size[0] * 0.8,  # 80% ширины (почти весь)
+            gun_size[0] * 0.8,  # 80% ширины
             gun_size[1] * 0.4  # 40% высоты
         )
 
@@ -623,13 +739,13 @@ class RusRouletteScreen(BaseGameScreen):
 
     def pull_trigger(self):
         """Спуск курка (вызывается при тапе по курку)"""
-        # self.result_label.text = '...'
-        # self.result_label.color = (1, 1, 0, 1)
-
         current_slot = self.bullet_slots[self.current_slot]
 
         if current_slot.has_bullet:
-            # ЗАРЯЖЕН - ДВОЙНАЯ ТРЯСКА (0.4 сек)
+            # ЗАРЯЖЕН - звук выстрела
+            self.play_gun_shot_sound()
+
+            # ДВОЙНАЯ ТРЯСКА (0.4 сек)
             anim = Animation(pos_hint={'center_x': 0.52, 'center_y': 0.53}, duration=0.05)
             anim += Animation(pos_hint={'center_x': 0.48, 'center_y': 0.57}, duration=0.05)
             anim += Animation(pos_hint={'center_x': 0.52, 'center_y': 0.53}, duration=0.05)
@@ -638,52 +754,15 @@ class RusRouletteScreen(BaseGameScreen):
             anim.start(self.gun_image)
             Clock.schedule_once(lambda dt: self.check_shot_result(), 0.3)
         else:
-            # ПУСТОЙ - МИНИМАЛЬНАЯ ТРЯСКА (0.15 сек)
+            # ПУСТОЙ - звук осечки
+            self.play_misfire_sound()
+
+            # МИНИМАЛЬНАЯ ТРЯСКА (0.15 сек)
             anim = Animation(pos_hint={'center_x': 0.51, 'center_y': 0.51}, duration=0.03)
             anim += Animation(pos_hint={'center_x': 0.49, 'center_y': 0.5}, duration=0.03)
             anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.49}, duration=0.03)
             anim.start(self.gun_image)
             Clock.schedule_once(lambda dt: self.check_shot_result(), 0.15)
-
-    def check_shot_result(self):
-        """Проверяет результат выстрела"""
-        # Проверяем, что есть слоты
-        if not self.bullet_slots or self.current_slot >= len(self.bullet_slots):
-            # Если слотов нет, просто показываем сообщение
-            self.result_label.text = 'Ошибка: нет данных о патронах'
-            self.result_label.color = (1, 0, 0, 1)
-            Clock.schedule_once(self.reset_result_text, 2.0)
-            return
-
-        current_slot = self.bullet_slots[self.current_slot]
-
-        if current_slot.has_bullet:
-            # Анимация отдачи
-            anim = Animation(pos_hint={'center_x': 0.52, 'center_y': 0.55}, duration=0.1)
-            anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.55}, duration=0.1)
-            anim.start(self.gun_image)
-
-            # Убираем патрон
-            current_slot.has_bullet = False
-            current_slot.update_appearance()
-            self.total_bullets -= 1
-            self.update_bullet_counter()
-
-        self.shots_fired += 1
-        self.current_slot = (self.current_slot + 1) % 6
-
-        self.update_bullet_counter()
-
-        # Нормализуем вращение
-        self.gun_rotation = self.gun_rotation % 360
-        self.gun_image.rotation = 0
-
-        self.update_current_slot()
-
-    # def reset_result_text(self, dt):
-    #     """Сбрасывает текст результата"""
-    #     self.result_label.text = 'Готов к следующему выстрелу'
-    #     self.result_label.color = (1, 1, 1, 1)
 
     def start_game(self):
         """Начать игру"""
@@ -709,7 +788,6 @@ class RusRouletteScreen(BaseGameScreen):
         # НОВОЕ: обновляем позицию прямоугольника при изменении размера окна
         if self.chamber_highlight:
             # Автоматически подстраиваем позицию под размер окна
-            # НО ВЫ МОЖЕТЕ ОТРЕДАКТИРОВАТЬ ЭТИ ЗНАЧЕНИЯ!
             self.chamber_highlight.pos = (Window.width * 0.43, Window.height * 0.45)
             if hasattr(self, 'highlight_rect'):
                 self.highlight_rect.pos = self.chamber_highlight.pos
@@ -719,13 +797,29 @@ class RusRouletteScreen(BaseGameScreen):
 
     def on_leave(self):
         """При выходе с экрана"""
-        # Возвращаем громкость фоновой музыки до 100% - ДОБАВИТЬ ЭТО
+        # Возвращаем громкость фоновой музыки до 100%
         self.sound_manager.fade_to(1.0, duration=0.5)
 
-        # Очищаем звук барабана
+        # Очищаем звуки
         if hasattr(self, 'chamber_sound') and self.chamber_sound:
             self.chamber_sound.stop()
             self.chamber_sound = None
+
+        if hasattr(self, 'gun_shot_sound') and self.gun_shot_sound:
+            self.gun_shot_sound.stop()
+            self.gun_shot_sound = None
+
+        if hasattr(self, 'misfire_sound') and self.misfire_sound:
+            self.misfire_sound.stop()
+            self.misfire_sound = None
+
+        if hasattr(self, 'bullet_load_sound') and self.bullet_load_sound:
+            self.bullet_load_sound.stop()
+            self.bullet_load_sound = None
+
+        if hasattr(self, 'revolve_sound') and self.revolve_sound:
+            self.revolve_sound.stop()
+            self.revolve_sound = None
 
         # Вызываем родительский метод
         super().on_leave()
