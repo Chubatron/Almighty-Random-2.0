@@ -1,6 +1,7 @@
 import math
 import random
 from kivy.animation import Animation
+from kivy.core.audio import SoundLoader
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.image import Image
 from kivy.uix.label import Label
@@ -12,7 +13,7 @@ from kivy.graphics import Color, Rectangle
 from screens.base_game_screen import BaseGameScreen
 from kivy.properties import NumericProperty
 from kivy.graphics import Rotate, PushMatrix, PopMatrix
-
+from kivy.clock import Clock
 
 class RotatingImage(Image):
     """Image с поддержкой вращения вокруг центра"""
@@ -102,6 +103,7 @@ class ImageButton(ButtonBehavior, Image):
 
 class RouletteScreen(BaseGameScreen):
     """Экран рулетки - только колесо и запуск"""
+
     def __init__(self, game_manager=None, **kwargs):
         super().__init__(**kwargs)
         self.name = 'roulette'
@@ -115,9 +117,18 @@ class RouletteScreen(BaseGameScreen):
         self.wheel = None
         self.is_spinning = False
         self.current_rotation = 0
+        self.ball_launched = False  # Флаг, был ли запущен шарик
 
         # Кнопка шарика для вращения
-        self.spin_button = None  # Добавляем атрибут для кнопки
+        self.spin_button = None
+
+        # Звуки
+        self.wheel_spin_sound = None  # Звук вращения колеса
+        self.ball_roll_sound = None  # Звук качения шарика
+
+        # Таймеры
+        self.spin_timer = None
+        self.ball_timer = None
 
         # Данные для разных типов рулеток
         self.roulette_data = {
@@ -253,10 +264,53 @@ class RouletteScreen(BaseGameScreen):
         self.spin_button.bind(on_press=self.spin_wheel)
         self.layout.add_widget(self.spin_button)
 
+    def play_wheel_spin_sound(self):
+        """Воспроизводит звук вращения колеса (один раз)"""
+        try:
+            if not self.wheel_spin_sound:
+                self.wheel_spin_sound = SoundLoader.load('assets/sounds/Roulette/roulette_drum_revolution.ogg')
+                if not self.wheel_spin_sound:
+                    print("Не удалось загрузить звук: assets/sounds/Roulette/roulette_drum_revolution.ogg")
+                    return
+
+            if self.wheel_spin_sound:
+                if self.wheel_spin_sound.state == 'play':
+                    self.wheel_spin_sound.stop()
+                self.wheel_spin_sound.loop = False  # ИЗМЕНЕНО: было True, стало False
+                self.wheel_spin_sound.play()
+        except Exception as e:
+            print(f"Ошибка при воспроизведении звука вращения колеса: {e}")
+
+    def play_ball_roll_sound(self):
+        """Воспроизводит звук качения шарика и возвращает его длительность"""
+        try:
+            if not self.ball_roll_sound:
+                self.ball_roll_sound = SoundLoader.load('assets/sounds/Roulette/ball_throw_american.ogg')
+                if not self.ball_roll_sound:
+                    print("Не удалось загрузить звук: assets/sounds/Roulette/ball_throw_american.ogg")
+                    return 0
+
+            if self.ball_roll_sound:
+                if self.ball_roll_sound.state == 'play':
+                    self.ball_roll_sound.stop()
+                self.ball_roll_sound.loop = False
+                self.ball_roll_sound.play()
+
+                # Возвращаем длительность звука в секундах
+                # Если длина неизвестна, используем стандартные 15 секунд
+                sound_length = self.ball_roll_sound.length
+                if sound_length:
+                    return sound_length
+                else:
+                    return 15.0  # Значение по умолчанию
+        except Exception as e:
+            print(f"Ошибка при воспроизведении звука качения шарика: {e}")
+            return 15.0
+
     def toggle_roulette_type(self, instance=None):
         """Переключить тип рулетки по нажатию кнопки"""
         print("Method toggle_roulette_type() called.")
-        # Сначала меняем тип на противоположный
+        # Сначала меняем тип на противоположныйз
         new_type = 'american' if self.roulette_type == 'european' else 'european'
         self.roulette_type = new_type
 
@@ -289,11 +343,71 @@ class RouletteScreen(BaseGameScreen):
         self.manager.current = 'menu'
 
     def spin_wheel(self, instance=None):
-        """Запуск вращения колеса рулетки"""
+        """Запуск вращения колеса рулетки (без шарика)"""
         if self.is_spinning or not self.wheel:
             return
 
-        print(f"🎰 Запускаю {self.roulette_type} рулетку...")
+        print(f"🎰 Запускаю вращение колеса {self.roulette_type} рулетки...")
+
+        # Сбрасываем флаг запуска шарика
+        self.ball_launched = False
+
+        # Останавливаем все звуки
+        self.stop_all_sounds()
+
+        # Запускаем звук вращения колеса - ИЗМЕНЕНО название файла
+        self.play_wheel_spin_sound()
+
+        self.is_spinning = True
+
+        # Нормализуем текущий угол
+        current_angle = self.wheel.angle % 360
+        self.wheel.angle = current_angle
+
+        # Добавляем случайное количество вращений
+        full_rotations = random.randint(8, 12)  # 8-12 полных оборотов
+        additional_angle = random.randint(0, 360)
+        target_angle = current_angle + 360 * full_rotations + additional_angle
+
+        print(f"Начальный угол: {current_angle}°, целевой: {target_angle}°")
+
+        # Создаем анимацию - ИЗМЕНЕНО время с 20.0 на 16.0
+        anim = Animation(
+            angle=target_angle,
+            duration=16.0,  # 16 секунд вращения
+            t='out_quad'  # Плавное замедление в конце
+        )
+
+        # Привязываем обработчики
+        anim.bind(on_complete=self._on_wheel_spin_complete)
+
+        # Запускаем анимацию
+        anim.start(self.wheel)
+
+        # Сохраняем анимацию для возможной остановки
+        self.current_animation = anim
+
+        # Запускаем таймер на случай, если анимация не завершится - ИЗМЕНЕНО с 22.0 на 18.0
+        self.spin_timer = Clock.schedule_once(self._force_stop_wheel, 18.0)
+
+    def _on_spin_progress(self, animation, widget, progress):
+        """Обновление вращения во время анимации"""
+        if self.wheel and hasattr(self.wheel, 'canvas'):
+            self.wheel.rotation = self.current_rotation
+            self.wheel.canvas.ask_update()
+
+    def launch_ball(self, instance=None):
+        """Запуск шарика в рулетку"""
+        if not self.is_spinning or self.ball_launched:
+            # Если колесо не вращается, сначала запускаем его
+            if not self.is_spinning:
+                self.spin_wheel()
+
+            # Если шарик уже запущен, игнорируем
+            if self.ball_launched:
+                return
+
+        print("🎯 Запускаю шарик в рулетку...")
 
         # Скрываем кнопку шарика с анимацией
         if self.spin_button:
@@ -305,59 +419,86 @@ class RouletteScreen(BaseGameScreen):
             anim_hide.bind(on_complete=lambda *args: setattr(self.spin_button, 'disabled', True))
             anim_hide.start(self.spin_button)
 
-        self.is_spinning = True
+        # Запускаем звук качения шарика и получаем его длительность
+        sound_duration = self.play_ball_roll_sound()
 
-        # Нормализуем текущий угол к диапазону 0-360
-        current_angle = self.wheel.angle % 360
+        self.ball_launched = True
 
-        # Устанавливаем нормализованный угол (чтобы колесо не вращалось с больших углов)
-        self.wheel.angle = current_angle
+        # Отменяем предыдущий таймер, если был
+        if self.spin_timer:
+            self.spin_timer.cancel()
+            self.spin_timer = None
 
-        # Добавляем случайное количество вращений (всегда положительное)
-        full_rotations = random.randint(5, 8)  # 5-8 полных оборотов
-        partial_rotation = random.randint(0, 360)  # 0-360 градусов дополнительно
+        # Запускаем таймер на длительность звука для показа результата
+        # Добавляем небольшую задержку для плавности
+        result_delay = sound_duration + 0.5
+        self.ball_timer = Clock.schedule_once(self._show_ball_result, result_delay)
 
-        # Вычисляем целевой угол
-        additional_rotations = 360 * full_rotations + partial_rotation
-        target_angle = current_angle + additional_rotations
+        print(f"⏱ Результат будет показан через {result_delay} секунд")
 
-        print(f"Начальный угол (нормализованный): {current_angle}°")
-        print(f"Полных оборотов: {full_rotations}")
-        print(f"Дополнительный угол: {partial_rotation}°")
-        print(f"Целевой угол: {target_angle}°")
+    def _on_wheel_spin_complete(self, animation, widget):
+        """Когда вращение колеса завершено само (без шарика) - просто останавливаем"""
+        print("🛑 Колесо остановилось самостоятельно, шарик не запускался")
 
-        # Создаем анимацию
-        anim = Animation(
-            angle=target_angle,
-            duration=random.uniform(3.0, 5.0),
-            t='out_cubic'
-        )
+        # Отменяем таймер
+        if self.spin_timer:
+            self.spin_timer.cancel()
+            self.spin_timer = None
 
-        # Привязываем обработчики
-        anim.bind(on_complete=self._on_spin_complete)
+        # Если шарик не запущен - останавливаем все звуки
+        if not self.ball_launched:
+            self.stop_all_sounds()
 
-        # Запускаем анимацию
-        anim.start(self.wheel)
-
-    def _on_spin_progress(self, animation, widget, progress):
-        """Обновление вращения во время анимации"""
-        if self.wheel and hasattr(self.wheel, 'canvas'):
-            self.wheel.rotation = self.current_rotation
-            self.wheel.canvas.ask_update()
-
-    def _on_spin_complete(self, animation, widget):
-        """Когда вращение завершено"""
-        print(f"🎰 {self.roulette_data[self.roulette_type]['name']} остановилась!")
+        # Сбрасываем флаги
         self.is_spinning = False
 
-        # Определяем выигрышный сектор
+    def _force_stop_wheel(self, dt):
+        """Принудительная остановка колеса через таймер - без результата"""
+        print("⏰ Таймер: принудительная остановка колеса")
+
+        if self.is_spinning:
+            # Останавливаем анимацию
+            if hasattr(self, 'current_animation') and self.current_animation:
+                self.current_animation.stop(self.wheel)
+
+            # Если шарик не запущен - останавливаем все звуки
+            if not self.ball_launched:
+                self.stop_all_sounds()
+
+            # Сбрасываем флаги
+            self.is_spinning = False
+
+            # НЕ показываем результат, просто останавливаемся
+
+        self.spin_timer = None
+
+    def _show_ball_result(self, dt):
+        """Показывает результат после запуска шарика"""
+        print("🎯 Шарик остановился, показываю результат")
+
+        # Останавливаем звук шарика (теперь он точно нужен)
+        if self.ball_roll_sound:
+            self.ball_roll_sound.stop()
+
+        # Останавливаем звук колеса на всякий случай
+        if self.wheel_spin_sound:
+            self.wheel_spin_sound.stop()
+            self.wheel_spin_sound.loop = False
+
+        # Останавливаем анимацию колеса
+        if hasattr(self, 'current_animation') and self.current_animation:
+            self.current_animation.stop(self.wheel)
+
+        # Сбрасываем флаги
+        self.is_spinning = False
+        self.ball_launched = False
+        self.ball_timer = None
+
+        # Получаем случайный результат
         winning_sector = self._get_winning_sector()
 
         # Показываем результат
         self._show_result(winning_sector)
-
-        # После закрытия попапа покажем кнопку шарика
-        # (это будет вызвано из метода закрытия попапа)
 
     def _show_spin_button(self):
         """Показать кнопку шарика после завершения вращения"""
@@ -618,10 +759,26 @@ class RouletteScreen(BaseGameScreen):
 
     def on_touch_down(self, touch):
         """Обработка касаний"""
+        # Проверяем касание колеса
         if self.wheel and hasattr(self.wheel, 'collide_point') and self.wheel.collide_point(*touch.pos):
             if not self.is_spinning:
+                # Если колесо не вращается - запускаем вращение колеса
                 self.spin_wheel()
+            # Если колесо уже вращается, ничего не делаем при касании колеса
             return True
+
+        # Проверяем касание кнопки шарика
+        if self.spin_button and self.spin_button.collide_point(*touch.pos):
+            if self.is_spinning and not self.ball_launched:
+                # Если колесо вращается и шарик еще не запущен - запускаем шарик
+                self.launch_ball()
+            elif not self.is_spinning:
+                # Если колесо не вращается - сначала запускаем колесо, потом шарик
+                self.spin_wheel()
+                # Запускаем шарик через небольшую задержку, чтобы колесо начало вращаться
+                Clock.schedule_once(lambda dt: self.launch_ball(), 0.5)
+            return True
+
         return super().on_touch_down(touch)
 
     def on_leave(self):
@@ -629,7 +786,32 @@ class RouletteScreen(BaseGameScreen):
         super().on_leave()
         Animation.cancel_all(self)
 
-        # Восстанавливаем кнопку при выходе с экрана
+        # Останавливаем все звуки
+        self.stop_all_sounds()
+
+        # Отменяем все таймеры
+        if self.spin_timer:
+            self.spin_timer.cancel()
+            self.spin_timer = None
+
+        if self.ball_timer:
+            self.ball_timer.cancel()
+            self.ball_timer = None
+
+        # Восстанавливаем кнопку
         if self.spin_button:
             self.spin_button.opacity = 1
             self.spin_button.disabled = False
+
+    def stop_all_sounds(self):
+        """Останавливает все звуки"""
+        if self.wheel_spin_sound:
+            self.wheel_spin_sound.stop()
+            self.wheel_spin_sound.loop = False
+
+    def stop_wheel_sound(self):
+        """Останавливает только звук вращения колеса"""
+        if self.wheel_spin_sound:
+            self.wheel_spin_sound.stop()
+            self.wheel_spin_sound.loop = False
+
