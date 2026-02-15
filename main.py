@@ -31,6 +31,9 @@ from screens.intermediate_dice import IntermediateDice
 from screens.intermediate_roulette import IntermediateRoulette
 from screens.intermediate_random import IntermediateRandom
 
+# Импортируем новый экран RSP
+from screens.rsp_screen import RSPScreen  # ИЗМЕНЕНО: было rps_screen, стало rsp_screen
+
 class SportsGameApp(App):
     def build(self):
         # Настройка окна
@@ -62,6 +65,9 @@ class SportsGameApp(App):
         self.sm.add_widget(QuizScreen(name='quiz'))
         self.sm.add_widget(RandomNumberScreen(name='random_number'))
 
+        # Добавляем новый экран RSP (Rock Scissors Paper)
+        self.sm.add_widget(RSPScreen(name='rsp'))  # ИЗМЕНЕНО: было 'rps', стало 'rsp'
+
         # промежуточные экраны
         self.sm.add_widget(IntermediateMagicBall(name='intermediate_magic_ball'))
         self.sm.add_widget(IntermediateDice(name='intermediate_dice'))
@@ -81,8 +87,6 @@ class SportsGameApp(App):
     def on_resume(self):
         """Возобновление при разворачивании"""
         SoundManager().play()
-
-
 
 if __name__ == '__main__':
     SportsGameApp().run()

@@ -74,12 +74,14 @@ class MainMenuScreen(Screen):
             ('Random', 'assets/images/buttons/Green_random_button.png', 'intermediate_random', self.change_to_intermediate),
             ('Coin', 'assets/images/buttons/Grey_cent_button.png', 'coin', self.change_to_game),
             ('Quiz', 'assets/images/buttons/Green_quiz_button.png', 'quiz', self.change_to_game),
+            ('RSP', 'assets/images/buttons/rsp_button.png', 'rsp', self.change_to_game),
         ]
 
-        # Сетка 5x2
-        rows, cols = 5, 2
-        button_width, button_height = 0.4, 0.15
-        horizontal_spacing, vertical_spacing = 0.1, 0.02
+        # Сетка теперь 4x2 (8 кнопок, но у нас только 7, поэтому последняя ячейка будет пустой)
+        # Изменяем размеры для лучшего размещения 7 кнопок
+        rows, cols = 4, 2  # 4 ряда по 2 кнопки = 8 позиций (7 кнопок + 1 пустая)
+        button_width, button_height = 0.4, 0.12  # Немного уменьшаем высоту кнопок
+        horizontal_spacing, vertical_spacing = 0.1, 0.03
         start_x, start_y = 0.05, 0.7
 
         for i, (text, icon_path, screen_name, callback) in enumerate(sports):

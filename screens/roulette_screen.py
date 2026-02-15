@@ -60,8 +60,9 @@ class ToggleButtonWithLabel(ButtonBehavior, FloatLayout):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.size_hint = (1, 0.6)
-        self.size = (350, 80)
+        # Убираем size_hint, чтобы кнопка не растягивалась на весь экран
+        self.size_hint = (None, None)  # Отключаем автоматическое растягивание
+        self.size = (150, 50)  # Размер кнопки 100x20
 
         # Изображение как фон - растягиваем на всю кнопку
         self.bg_image = Image(
@@ -75,7 +76,7 @@ class ToggleButtonWithLabel(ButtonBehavior, FloatLayout):
         # Текст по центру поверх изображения
         self.label = Label(
             text='',
-            font_size='22sp',
+            font_size='20sp',  # Уменьшаем размер шрифта для маленькой кнопки
             bold=True,
             color=(1, 1, 1, 1),
             size_hint=(1, 1),
