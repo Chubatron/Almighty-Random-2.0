@@ -2,7 +2,8 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.uix.screenmanager import ScreenManager, FadeTransition
 from kivy.core.window import Window
-
+from language_manager import LanguageManager
+from multilanguage_widgets import MLLabel, MLButton  # Импортируем новые виджеты
 
 # Импортируем экраны
 from screens.game_screen import GameScreen
@@ -36,6 +37,9 @@ from screens.rsp_screen import RSPScreen  # ИЗМЕНЕНО: было rps_scree
 
 class SportsGameApp(App):
     def build(self):
+        # Инициализация LanguageManager (ДО создания экранов)
+        self.lang = LanguageManager()
+
         # Настройка окна
         Window.size = (400, 700)
         Window.clearcolor = (0.1, 0.1, 0.1, 1)
@@ -87,6 +91,10 @@ class SportsGameApp(App):
     def on_resume(self):
         """Возобновление при разворачивании"""
         SoundManager().play()
+
+    def _(self, key):
+        """Вспомогательный метод для получения перевода"""
+        return self.lang._(key)
 
 if __name__ == '__main__':
     SportsGameApp().run()

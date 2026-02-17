@@ -1,3 +1,4 @@
+import os
 import random
 
 from kivy.uix.image import Image
@@ -140,8 +141,6 @@ class ChamberModal(ModalView):
 
     def create_chamber_ui(self, dt=None):
         """Создает интерфейс модального окна барабана"""
-        # УБРАН затемненный фон!
-
         # === 1. БАРАБАН (фон) ===
         drum_size = min(self.layout.width, self.layout.height) * 0.7
         try:
@@ -204,21 +203,47 @@ class ChamberModal(ModalView):
             self.slot_buttons.append(slot_btn)
             self.layout.add_widget(slot_btn)
 
-        # === КНОПКА LOAD (возврат в основной экран) ===
-        load_btn = Button(
-            text='LOAD',
-            font_size='20sp',
-            bold=True,
-            size_hint=(None, None),
-            size=(150, 60),
-            pos_hint={'center_x': 0.5, 'y': 0.05},
-            background_color=(0.3, 0.3, 0.3, 0.8),
-            background_normal='',
-            color=(1, 1, 1, 1)
-        )
-        # ИЗМЕНЕНИЕ: привязываем к методу с звуком
-        load_btn.bind(on_release=self.close_modal_with_sound)
-        self.layout.add_widget(load_btn)
+        # ✅ ИЗМЕНЕНО: Вместо кнопки LOAD - изображение
+        self.create_close_image()
+
+    def create_close_image(self):
+        """Создает изображение для закрытия модального окна"""
+
+        # Путь к изображению (измените на ваш файл)
+        close_image_path = 'assets/images/guns/load_button.png'
+
+        # Проверяем существование файла
+        if os.path.exists(close_image_path):
+            # Создаем изображение с поведением кнопки
+            class ImageButton(ButtonBehavior, KivyImage):
+                pass
+
+            close_btn = ImageButton(
+                source=close_image_path,
+                size_hint=(None, None),
+                size=(200, 200),  # Размер под ваш дизайн
+                pos_hint={'center_x': 0.5, 'y': 0.05},
+                allow_stretch=True,
+                keep_ratio=True
+            )
+        else:
+            # Если файл не найден, создаем текстовую кнопку как запасной вариант
+            print(f"⚠️ Файл {close_image_path} не найден, использую текстовую кнопку")
+            close_btn = Button(
+                text='ЗАКРЫТЬ',
+                font_size='20sp',
+                bold=True,
+                size_hint=(None, None),
+                size=(150, 60),
+                pos_hint={'center_x': 0.5, 'y': 0.05},
+                background_color=(0.3, 0.3, 0.3, 0.8),
+                background_normal='',
+                color=(1, 1, 1, 1)
+            )
+
+        # Привязываем закрытие с звуком
+        close_btn.bind(on_release=self.close_modal_with_sound)
+        self.layout.add_widget(close_btn)
 
     def toggle_slot(self, slot_index):
         """Переключает патрон в слоте"""

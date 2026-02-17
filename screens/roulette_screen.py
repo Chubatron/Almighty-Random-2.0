@@ -206,8 +206,20 @@ class RouletteScreen(BaseGameScreen):
         print("Method show_wheel_view called")
         """Показать вид с вращающимся колесом"""
         print(f"Экран {self.roulette_data[self.roulette_type]['name']}")
-        self.clear_layout()
 
+        # Сбрасываем флаги состояния
+        self.is_spinning = False
+        self.ball_launched = False
+
+        # Отменяем все таймеры
+        if self.spin_timer:
+            self.spin_timer.cancel()
+            self.spin_timer = None
+        if self.ball_timer:
+            self.ball_timer.cancel()
+            self.ball_timer = None
+
+        self.clear_layout()
         # Устанавливаем изображение и текст
         data = self.roulette_data[self.roulette_type]
         self.type_switch_button.icon.source = data['button_image']
@@ -784,11 +796,11 @@ class RouletteScreen(BaseGameScreen):
 
     def on_leave(self):
         """При выходе с экрана"""
-        super().on_leave()
-        Animation.cancel_all(self)
-
         # Останавливаем все звуки
         self.stop_all_sounds()
+
+        # Отменяем все анимации
+        Animation.cancel_all(self)
 
         # Отменяем все таймеры
         if self.spin_timer:
@@ -799,10 +811,21 @@ class RouletteScreen(BaseGameScreen):
             self.ball_timer.cancel()
             self.ball_timer = None
 
+        # СБРАСЫВАЕМ ВСЕ ФЛАГИ СОСТОЯНИЯ!
+        self.is_spinning = False
+        self.ball_launched = False
+
+        # Сбрасываем угол колеса для единообразия (опционально)
+        if self.wheel:
+            self.wheel.angle = 0
+
         # Восстанавливаем кнопку
         if self.spin_button:
             self.spin_button.opacity = 1
             self.spin_button.disabled = False
+
+        # Вызываем родительский метод
+        super().on_leave()
 
     def stop_all_sounds(self):
         """Останавливает все звуки"""
@@ -810,9 +833,13 @@ class RouletteScreen(BaseGameScreen):
             self.wheel_spin_sound.stop()
             self.wheel_spin_sound.loop = False
 
+        # Добавьте эту секцию!
+        if self.ball_roll_sound:
+            self.ball_roll_sound.stop()
+            self.ball_roll_sound.loop = False
+
     def stop_wheel_sound(self):
         """Останавливает только звук вращения колеса"""
         if self.wheel_spin_sound:
             self.wheel_spin_sound.stop()
             self.wheel_spin_sound.loop = False
-
