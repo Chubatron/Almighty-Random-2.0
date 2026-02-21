@@ -10,8 +10,10 @@ from kivy.vector import Vector
 from components.ball_physics import BallPhysics
 from components.sprite_sheet_ball import SpriteSheetBall
 
+from screens.base_game_screen import BaseGameScreen  # Импортируем базовый класс
 
-class GameScreen(Screen):
+
+class GameScreen(BaseGameScreen):  # Наследуемся от BaseGameScreen, а не от Screen
     # Основные свойства
     sprite_sheet_path = StringProperty('')  # Путь к спрайт-листу
     background_image = StringProperty('')
@@ -21,37 +23,26 @@ class GameScreen(Screen):
     ball_type = StringProperty('soccer')  # Тип мяча для физики
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.layout = FloatLayout()
+        super().__init__(**kwargs)  # Вызываем родительский __init__
 
         # Основные компоненты
         self.ball_widget = None
         self.ball_physics = None
-        self.sound = None
 
         # Состояние
         self.touch_start_pos = None
         self.is_physics_enabled = False
         self.total_distance_traveled = 0  # Общее пройденное расстояние
 
-        # Графика
-        self.bg_image = None
-
         # Таймеры
         self.physics_clock = None
         self.animation_clock = None
+        self.animation_counter = 0
 
-        # Добавляем layout
-        self.add_widget(self.layout)
-
-        # Кнопка назад
-        self.back_button = None
-
-        # Привязываем обновление размеров
-        self.bind(size=self._on_size_change)
-
+        # Эффекты
         self.stop_effect = None
         self.show_stop_effect = True  # Флаг для включения/выключения
+        self.checking_stop = False  # Флаг проверки остановки
 
     def _on_size_change(self, instance, value):
         """Обновляет позицию мяча при изменении размера экрана"""
@@ -68,44 +59,45 @@ class GameScreen(Screen):
 
     def on_enter(self):
         """При входе на экран"""
-        self.setup_background()
-        self.setup_ui()
+        # Вызываем родительский метод для создания фона, музыки и кнопки
+        super().on_enter()
+
+        # Добавляем игровой интерфейс
+        self.setup_game_ui()
+
+        # Запускаем обновления
         self.start_physics_update()
         self.start_animation_update()
 
-        self.back_button = self.create_back_button()
-        self.layout.add_widget(self.back_button)
-        self.checking_stop = False  # Флаг проверки остановки
+    def on_leave(self):
+        """При выходе с экрана"""
+        # Останавливаем все процессы
+        if self.physics_clock:
+            self.physics_clock.cancel()
+            self.physics_clock = None
 
+        if self.animation_clock:
+            self.animation_clock.cancel()
+            self.animation_clock = None
 
-    def create_back_button(self):
-        """Создает кнопку возврата в меню с картинкой"""
-        from kivy.uix.behaviors import ButtonBehavior
-        from kivy.uix.image import Image as KivyImage
+        # Вызываем родительский метод
+        super().on_leave()
 
-        class ImageButton(ButtonBehavior, KivyImage):
-            pass
+    def setup_game_ui(self):
+        """Настраивает игровой интерфейс (мяч и инструкцию)"""
+        # Создаем мяч из спрайт-листа
+        self.create_sprite_sheet_ball()
 
-        back_btn = ImageButton(
-            source='assets/images/buttons/Orange_back_to_menu_button.png',  # Укажите путь к вашей картинке
+        # Добавляем инструкцию
+        instruction = Label(
+            text='Проведите пальцем по мячу для броска',
+            font_size='14sp',
+            color=(1, 1, 1, 0.8),
             size_hint=(None, None),
-            size=(60, 60),  # Размер кнопки
-            pos_hint={'x': 0.09, 'y': 0.055},
-            allow_stretch=True
+            size=(300, 30),
+            pos_hint={'center_x': 0.5, 'top': 0.85}
         )
-
-        # Анимация при нажатии
-        def on_press(instance):
-            Animation(opacity=0.7, duration=0.1).start(instance)
-
-        def on_release(instance):
-            Animation(opacity=1.0, duration=0.1).start(instance)
-            Clock.schedule_once(lambda dt: self.go_to_menu(instance), 0.1)
-
-        back_btn.bind(on_press=on_press)
-        back_btn.bind(on_release=on_release)
-
-        return back_btn
+        self.layout.add_widget(instruction)
 
     def start_physics_update(self):
         if self.physics_clock:
@@ -180,7 +172,7 @@ class GameScreen(Screen):
                 "ПОПРОБУЙ ЕЩЕ РАЗ",
                 "ПОДУМАЙ ДВАЖДЫ",
                 "СОМНЕВАЕШСЯ? НЕ ДЕЛАЙ!",
-                "ВЫБЕРИ ДРУШУЮ СТОРОНУ"
+                "ВЫБЕРИ ДРУГУЮ СТОРОНУ"  # Исправлено "ДРУШУЮ" на "ДРУГУЮ"
             ]
             message = random.choice(messages)
 
@@ -215,40 +207,6 @@ class GameScreen(Screen):
                 # Мяч остановился - статичный кадр
                 self.ball_widget.frame_index = 0
                 self.animation_counter = 0
-
-    def setup_background(self):
-        """Настраивает фон"""
-        if self.bg_image:
-            self.layout.remove_widget(self.bg_image)
-
-        from kivy.uix.image import Image
-        self.bg_image = Image(
-            source=self.background_image,
-            allow_stretch=True,
-            keep_ratio=False
-        )
-        self.layout.add_widget(self.bg_image)
-
-    def setup_ui(self):
-        """Настраивает пользовательский интерфейс"""
-        # Очищаем старые элементы, кроме фона
-        for child in self.layout.children[:]:
-            if child not in [self.bg_image, self.ball_widget, self.back_button]:
-                self.layout.remove_widget(child)
-
-        # Создаем мяч из спрайт-листа
-        self.create_sprite_sheet_ball()
-
-        # Добавляем инструкцию
-        instruction = Label(
-            text='Проведите пальцем по мячу для броска',
-            font_size='14sp',
-            color=(1, 1, 1, 0.8),
-            size_hint=(None, None),
-            size=(300, 30),
-            pos_hint={'center_x': 0.5, 'top': 0.85}
-        )
-        self.layout.add_widget(instruction)
 
     def create_sprite_sheet_ball(self):
         """Создает мяч из спрайт-листа - ПОЛНАЯ ВЕРСИЯ"""
@@ -288,7 +246,7 @@ class GameScreen(Screen):
         print(f"   Размер мяча: {self.ball_size}")
         print(f"   Позиция мяча: ({center_x - self.ball_size / 2}, {center_y - self.ball_size / 2})")
 
-        # СОЗДАЕМ МЯЧ - ЭТОГО КОДА НЕ БЫЛО!
+        # СОЗДАЕМ МЯЧ
         self.ball_widget = SpriteSheetBall(
             sprite_sheet_path=self.sprite_sheet_path,
             ball_size=self.ball_size,
@@ -327,13 +285,8 @@ class GameScreen(Screen):
 
         # Убедимся что мяч поверх фона
         self.ball_widget.opacity = 1.0
-        self.bg_image.opacity = 1.0  # Фон не должен быть поверх мяча
-    # def create_ball(self):
-    #     if self.ball_widget:
-    #         self.layout.remove_widget(self.ball_widget)
-    #
-    #     center_x = self.layout.width / 2
-    #     center_y = self.layout.height / 2
+        if self.bg_image:
+            self.bg_image.opacity = 1.0  # Фон не должен быть поверх мяча
 
     def on_touch_down(self, touch):
         if self.ball_widget and self.ball_widget.collide_point(*touch.pos):
@@ -370,12 +323,18 @@ class GameScreen(Screen):
             self.sound.play()
             Clock.schedule_once(lambda dt: setattr(self.sound, 'volume', 1.0) if self.sound else None, 0.1)
 
-    def go_to_menu(self, instance):
+    def go_to_menu(self, instance=None):
+        """Возврат в меню"""
         self.remove_ball()
         if self.physics_clock:
             self.physics_clock.cancel()
             self.physics_clock = None
-        self.manager.current = 'menu'
+        if self.animation_clock:
+            self.animation_clock.cancel()
+            self.animation_clock = None
+
+        # Вызываем родительский метод
+        super().go_to_menu()
 
     def remove_ball(self):
         if self.ball_widget:
@@ -392,8 +351,6 @@ class GameScreen(Screen):
 
     def remove_panel(self):
         print(self.layout.children)
-
-
 
     def start_game(self):
         if self.ball_widget and self.ball_physics:

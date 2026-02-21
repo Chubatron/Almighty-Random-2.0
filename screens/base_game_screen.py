@@ -5,6 +5,7 @@ from kivy.clock import Clock
 from kivy.animation import Animation
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.image import Image as KivyImage
+from kivy.graphics import Rotate, PushMatrix, PopMatrix
 from sound_manager import SoundManager  # Импортируем SoundManager
 
 
@@ -16,6 +17,9 @@ class BaseGameScreen(Screen):
 
     # Флаг для определения, является ли экран игровым (нужно для регулировки громкости)
     is_game_screen = True  # По умолчанию True для игровых экранов
+
+    # Флаг для специальной настройки кнопки назад (для CoinScreen)
+    custom_back_button = False  # По умолчанию False для всех экранов
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -44,7 +48,7 @@ class BaseGameScreen(Screen):
         """При входе на экран"""
         self.setup_background()
         self.setup_sound()
-        self.create_back_button()
+        self.create_back_button()  # Создает кнопку с учетом флага custom_back_button
 
         # Если это игровой экран, плавно убавляем фоновую музыку
         if self.is_game_screen:
@@ -95,7 +99,16 @@ class BaseGameScreen(Screen):
             self.sound = None
 
     def create_back_button(self):
-        """Создает кнопку возврата в меню с картинкой"""
+        """Создает кнопку возврата в меню с учетом флага custom_back_button"""
+        if self.custom_back_button:
+            # Для CoinScreen - специальная кнопка
+            self._create_custom_back_button()
+        else:
+            # Для всех остальных экранов - обычная кнопка
+            self._create_standard_back_button()
+
+    def _create_standard_back_button(self):
+        """Создает стандартную кнопку возврата в меню (оригинальная позиция)"""
 
         class ImageButton(ButtonBehavior, KivyImage):
             pass
@@ -104,7 +117,7 @@ class BaseGameScreen(Screen):
             source='assets/images/buttons/Orange_back_to_menu_button.png',
             size_hint=(None, None),
             size=(60, 60),
-            pos_hint={'x': 0.09, 'y': 0.055},
+            pos_hint={'x': 0.09, 'y': 0.055},  # Оригинальная позиция
             allow_stretch=True
         )
 
@@ -122,5 +135,51 @@ class BaseGameScreen(Screen):
         self.back_button = back_btn
         self.layout.add_widget(back_btn)
 
+    def _create_custom_back_button(self):
+        """Создает кастомную кнопку возврата в меню (левый верхний угол, повернутая на 90°)"""
+
+        class ImageButton(ButtonBehavior, KivyImage):
+            pass
+
+        back_btn = ImageButton(
+            source='assets/images/buttons/Orange_back_to_menu_button.png',
+            size_hint=(None, None),
+            size=(60, 60),
+            pos_hint={'x': 0.02, 'y': 0.88},  # Левый верхний угол
+            allow_stretch=True
+        )
+
+        # Поворачиваем кнопку на 90 градусов
+        def apply_rotation(btn):
+            """Применяет поворот к кнопке"""
+            btn.canvas.before.clear()
+            btn.canvas.after.clear()
+            with btn.canvas.before:
+                PushMatrix()
+                Rotate(angle=90, origin=(btn.width / 2, btn.height / 2))
+            with btn.canvas.after:
+                PopMatrix()
+
+        # Применяем поворот сразу
+        apply_rotation(back_btn)
+
+        # Обновляем поворот при изменении размера
+        back_btn.bind(size=lambda instance, value: apply_rotation(instance))
+
+        # Анимация при нажатии
+        def on_press(instance):
+            Animation(opacity=0.7, duration=0.1).start(instance)
+
+        def on_release(instance):
+            Animation(opacity=1.0, duration=0.1).start(instance)
+            Clock.schedule_once(lambda dt: self.go_to_menu(), 0.1)
+
+        back_btn.bind(on_press=on_press)
+        back_btn.bind(on_release=on_release)
+
+        self.back_button = back_btn
+        self.layout.add_widget(back_btn)
+
     def start_game(self):
+        """Метод для запуска игры (может быть переопределен в дочерних классах)"""
         pass
