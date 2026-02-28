@@ -3,9 +3,12 @@ from kivy.uix.label import Label
 from kivy.uix.image import Image
 from kivy.animation import Animation
 from kivy.clock import Clock
+from kivy.core.audio import SoundLoader
 from animated_background import AnimatedBackground
 from components.icon_button import IconButton
 from screens.menu_screen import MainMenuScreen
+import os
+
 
 class IntermediateMagicBall(MainMenuScreen):
     def __init__(self, **kwargs):
@@ -55,10 +58,36 @@ class IntermediateMagicBall(MainMenuScreen):
         )
         layout.add_widget(title)
 
+        # Загружаем звук для кнопки назад
+        self.load_back_sound()
+
         # Создаем кнопки
         self.create_buttons(layout)
         self.add_back_button(layout)
         self.add_widget(layout)
+
+    def load_back_sound(self):
+        """Загружает звук для кнопки назад"""
+        sound_path = 'assets/sounds/Schpun.ogg'
+
+        if os.path.exists(sound_path):
+            self.back_sound = SoundLoader.load(sound_path)
+            if self.back_sound:
+                self.back_sound.volume = 0.8
+                print(f"✅ Loaded back button sound: {sound_path}")
+            else:
+                print(f"⚠️ Failed to load back button sound: {sound_path}")
+        else:
+            print(f"⚠️ Back button sound file not found: {sound_path}")
+
+    def play_back_sound(self):
+        """Воспроизводит звук при нажатии на кнопку назад"""
+        if hasattr(self, 'back_sound') and self.back_sound:
+            try:
+                self.back_sound.play()
+                print("🔊 Playing back button sound")
+            except:
+                pass
 
     def create_buttons(self, layout):
         """Создает кнопки видов спорта"""
@@ -74,7 +103,7 @@ class IntermediateMagicBall(MainMenuScreen):
         rows, cols = 3, 1
         button_width, button_height = 0.2, 0.2
         horizontal_spacing, vertical_spacing = 0.1, 0.02
-        start_x, start_y = 0.5 - (button_width / 2) , 0.65
+        start_x, start_y = 0.5 - (button_width / 2), 0.65
 
         for i, (text, icon_path, screen_name, callback) in enumerate(sports):
             row, col = i // cols, i % cols
@@ -92,11 +121,16 @@ class IntermediateMagicBall(MainMenuScreen):
 
             layout.add_widget(btn)
 
-    def go_to_menu(self, instance):
+    def go_to_menu(self, instance=None):
+        """Переход в меню с воспроизведением звука"""
+        # Воспроизводим звук
+        self.play_back_sound()
+
+        # Переходим в меню
         self.manager.current = 'menu'
 
     def create_back_button(self, layout):
-        """Создает кнопку назад с картинкой"""
+        """Создает кнопку назад с картинкой и звуком"""
         from kivy.uix.behaviors import ButtonBehavior
         from kivy.uix.image import Image
 
@@ -104,22 +138,21 @@ class IntermediateMagicBall(MainMenuScreen):
             pass
 
         back_btn = BackImageButton(
-            source='assets/images/buttons/Orange_back_to_menu_button.png',  # Укажите путь к вашей картинке
-            size_hint=(0.08, 0.08),
+            source='assets/images/buttons/Orange_back_to_menu_button.png',
+            size_hint=(None, None),
             size=(60, 60),
-            pos_hint={'x': 0.09, 'y': 0.055},
+            pos_hint={'x': 0.05, 'y': 0.02},
             allow_stretch=True,
-            keep_ratio = True  # Сохраняет пропорции изображения
-
+            keep_ratio=True
         )
 
-        # Анимация при нажатии
         def on_press(instance):
             Animation(opacity=0.7, duration=0.1).start(instance)
 
         def on_release(instance):
             Animation(opacity=1.0, duration=0.1).start(instance)
-            Clock.schedule_once(lambda dt: self.go_to_menu(instance), 0.1)
+            # УБИРАЕМ play_back_sound() ОТСЮДА
+            Clock.schedule_once(lambda dt: self.go_to_menu(), 0.1)
 
         back_btn.bind(on_press=on_press)
         back_btn.bind(on_release=on_release)

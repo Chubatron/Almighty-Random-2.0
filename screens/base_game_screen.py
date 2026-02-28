@@ -7,6 +7,7 @@ from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.image import Image as KivyImage
 from kivy.graphics import Rotate, PushMatrix, PopMatrix
 from sound_manager import SoundManager  # Импортируем SoundManager
+import os
 
 
 class BaseGameScreen(Screen):
@@ -28,6 +29,9 @@ class BaseGameScreen(Screen):
         # Музыка/звук
         self.sound = None
 
+        # Звук для кнопки назад
+        self.back_sound = None
+
         # Фон
         self.bg_image = None
 
@@ -39,6 +43,34 @@ class BaseGameScreen(Screen):
 
         self.add_widget(self.layout)
         self.bind(size=self._on_size_change)
+
+        # Загружаем звук для кнопки назад
+        self.load_back_sound()
+
+    def load_back_sound(self):
+        """Загружает звук для кнопки назад"""
+        from kivy.core.audio import SoundLoader
+
+        sound_path = 'assets/sounds/Schpun.ogg'
+
+        if os.path.exists(sound_path):
+            self.back_sound = SoundLoader.load(sound_path)
+            if self.back_sound:
+                self.back_sound.volume = 0.8  # Громкость для звука кнопки
+                print(f"✅ Loaded back button sound: {sound_path}")
+            else:
+                print(f"⚠️ Failed to load back button sound: {sound_path}")
+        else:
+            print(f"⚠️ Back button sound file not found: {sound_path}")
+
+    def play_back_sound(self):
+        """Воспроизводит звук при нажатии на кнопку назад"""
+        if self.back_sound:
+            try:
+                self.back_sound.play()
+                print("🔊 Playing back button sound")
+            except:
+                pass  # Игнорируем ошибки при воспроизведении
 
     def _on_size_change(self, instance, value):
         """Обновление позиций при изменении размера"""
@@ -64,6 +96,9 @@ class BaseGameScreen(Screen):
 
     def go_to_menu(self):
         """Возврат в меню"""
+        # Воспроизводим звук кнопки назад
+        self.play_back_sound()
+
         self.stop_sound()
         # Возвращаем громкость перед переходом в меню
         self.sound_manager.fade_to(1.0, duration=0.5)
@@ -128,7 +163,6 @@ class BaseGameScreen(Screen):
         def on_release(instance):
             Animation(opacity=1.0, duration=0.1).start(instance)
             Clock.schedule_once(lambda dt: self.go_to_menu(), 0.1)
-
         back_btn.bind(on_press=on_press)
         back_btn.bind(on_release=on_release)
 
@@ -172,6 +206,8 @@ class BaseGameScreen(Screen):
 
         def on_release(instance):
             Animation(opacity=1.0, duration=0.1).start(instance)
+            # Воспроизводим звук перед переходом
+            self.play_back_sound()
             Clock.schedule_once(lambda dt: self.go_to_menu(), 0.1)
 
         back_btn.bind(on_press=on_press)

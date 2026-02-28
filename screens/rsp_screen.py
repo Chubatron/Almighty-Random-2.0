@@ -4,6 +4,7 @@ from kivy.uix.label import Label
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.image import Image
+from kivy.uix.button import Button
 from kivy.properties import NumericProperty, StringProperty
 from kivy.clock import Clock
 import math
@@ -175,34 +176,143 @@ class RSPScreen(GameScreen):
         self.current_animation = None
         self.spin_timer = None
 
+        # Для звуков
+        self.spin_sound = None
+        self.result_sounds = {}
+
         # Соответствие углов и элементов
         self.classic_angles = {
             0: 'scissors',  # 0° - ножницы
-            120: 'paper',   # 120° - бумага
-            240: 'rock'     # 240° - камень
+            120: 'paper',  # 120° - бумага
+            240: 'rock'  # 240° - камень
         }
 
         self.extended_angles = {
-            0: 'spock',      # 0° - спок
+            0: 'spock',  # 0° - спок
             72: 'scissors',  # 72° - ножницы
-            144: 'lizard',   # 144° - ящерица
-            216: 'rock',     # 216° - камень
-            288: 'paper'     # 288° - бумага
+            144: 'lizard',  # 144° - ящерица
+            216: 'rock',  # 216° - камень
+            288: 'paper'  # 288° - бумага
         }
 
     def on_enter(self):
         """При входе на экран"""
+        # Сначала вызываем родительский метод для управления музыкой и фоном
+        super().on_enter()
+
         self.is_spinning = False
         self.winner_image = None
 
-        self.layout.clear_widgets()
+        # Очищаем layout (кроме фона и кнопки назад)
+        self.clear_ui()
 
-        self.setup_background()
+        # Показываем интерфейс игры
         self.show_ui()
+
+        # Загружаем звуки результатов
+        self.load_result_sounds()
+
+        # Сбрасываем спиннер в стартовое положение
+        self.reset_spinner()
 
         self.layout.bind(size=self.update_layout, pos=self.update_layout)
 
         Clock.schedule_once(lambda dt: self.update_layout(), 0.1)
+
+    def on_leave(self):
+        """При выходе с экрана"""
+        # Останавливаем все звуки
+        self.stop_all_sounds()
+
+        # Останавливаем анимацию вращения (как в рулетке)
+        self.stop_spinner_animation()
+
+        # Отменяем таймер
+        if self.spin_timer:
+            self.spin_timer.cancel()
+            self.spin_timer = None
+
+        if hasattr(self, 'spin_button') and self.spin_button:
+            self.spin_button.unbind(on_press=self.start_spin)
+
+        if hasattr(self, 'type_switch_button') and self.type_switch_button:
+            self.type_switch_button.unbind(on_press=self.toggle_game_type)
+
+        if hasattr(self, 'layout'):
+            self.layout.unbind(size=self.update_layout, pos=self.update_layout)
+
+        # Очищаем виджеты (но не вызываем clear_widgets, так как это сделает родитель)
+        self.spin_button = None
+        self.title_label = None
+        self.type_switch_button = None
+        self.spinner_image_3 = None
+        self.spinner_image_5 = None
+        self.current_spinner = None
+        self.winner_image = None
+
+        # Вызываем родительский метод для управления музыкой
+        super().on_leave()
+
+    def stop_all_sounds(self):
+        """Останавливает все звуки"""
+        # Останавливаем звук спиннера
+        if self.spin_sound:
+            try:
+                if self.spin_sound.state == 'play':
+                    self.spin_sound.stop()
+            except:
+                pass  # Игнорируем ошибки при закрытии
+            self.spin_sound = None
+
+        # Останавливаем все звуки результатов
+        for sound in self.result_sounds.values():
+            try:
+                if sound.state == 'play':
+                    sound.stop()
+            except:
+                pass  # Игнорируем ошибки при закрытии
+
+    def stop_spinner_animation(self):
+        """Останавливает анимацию спиннера и возвращает его в исходное состояние"""
+        # Останавливаем текущую анимацию
+        Animation.cancel_all(self)
+
+        # Сбрасываем флаг вращения
+        self.is_spinning = False
+
+        # Возвращаем спиннер в стартовое положение (0 градусов)
+        if self.current_spinner:
+            self.current_spinner.angle = 0
+
+        # Возвращаем кнопку в зеленое состояние и включаем
+        if self.spin_button:
+            self.spin_button.is_active = 1
+            self.spin_button.disabled = False
+
+    def reset_spinner(self):
+        """Сбрасывает спиннер в стартовое положение"""
+        # Останавливаем все звуки
+        self.stop_all_sounds()
+
+        # Останавливаем анимацию
+        self.stop_spinner_animation()
+
+        # Сбрасываем угол для всех спиннеров
+        if self.spinner_image_3:
+            self.spinner_image_3.angle = 0
+        if self.spinner_image_5:
+            self.spinner_image_5.angle = 0
+
+        print("🔄 Spinner reset to start position")
+
+    def go_to_menu(self):
+        """Переопределяем метод для возврата в меню с остановкой всех процессов"""
+        # Останавливаем все звуки и анимации перед уходом
+        self.stop_all_sounds()
+        self.stop_spinner_animation()
+
+        # Вызываем родительский метод для перехода в меню
+        super().go_to_menu()
 
     def apply_current_game_type(self):
         """Применяет текущий тип игры при входе на экран"""
@@ -234,39 +344,6 @@ class RSPScreen(GameScreen):
 
         print(f"Applied game type: {self.game_type}")
 
-    def on_leave(self):
-        """При выходе с экрана"""
-        # Останавливаем анимацию вращения (как в рулетке)
-        Animation.cancel_all(self)
-
-        # Отменяем таймер
-        if self.spin_timer:
-            self.spin_timer.cancel()
-            self.spin_timer = None
-
-        if hasattr(self, 'spin_button') and self.spin_button:
-            self.spin_button.unbind(on_press=self.start_spin)
-
-        if hasattr(self, 'type_switch_button') and self.type_switch_button:
-            self.type_switch_button.unbind(on_press=self.toggle_game_type)
-
-        if hasattr(self, 'layout'):
-            self.layout.unbind(size=self.update_layout, pos=self.update_layout)
-
-        if hasattr(self, 'layout'):
-            self.layout.clear_widgets()
-
-        self.spin_button = None
-        self.title_label = None
-        self.type_switch_button = None
-        self.back_button = None
-        self.spinner_image_3 = None
-        self.spinner_image_5 = None
-        self.current_spinner = None
-        self.winner_image = None
-
-        super().on_leave()
-
     def update_layout(self, *args):
         """Обновляет параметры layout при изменении размера"""
         self.center_x = self.layout.width / 2
@@ -290,11 +367,15 @@ class RSPScreen(GameScreen):
         if self.spin_button:
             self.spin_button.center = (self.center_x, self.center_y)
 
+        # Обновляем позицию back_button при изменении layout
+        # (но не меняем её, если она уже установлена через pos_hint)
+
     def setup_background(self):
         """Настраивает фон"""
         if self.bg_image:
             self.layout.remove_widget(self.bg_image)
 
+        from kivy.uix.image import Image
         self.bg_image = Image(
             source=self.background_image,
             allow_stretch=True,
@@ -304,10 +385,7 @@ class RSPScreen(GameScreen):
 
     def show_ui(self):
         """Показать интерфейс с кнопкой переключения"""
-        self.clear_ui()
-
-        self.back_button = self.create_back_button()
-        self.layout.add_widget(self.back_button)
+        # Не вызываем clear_ui здесь, так как мы уже очистили в on_enter
 
         self.type_switch_button = ToggleButtonWithLabel(
             size_hint=(None, None),
@@ -393,12 +471,54 @@ class RSPScreen(GameScreen):
         else:
             print("⚠️ Файл spinner_5.png не найден")
 
+    def load_result_sounds(self):
+        """Загружает звуки для каждого результата"""
+        sound_files = {
+            'rock': 'assets/sounds/rsp/stone.ogg',
+            'paper': 'assets/sounds/rsp/paper.ogg',
+            'scissors': 'assets/sounds/rsp/scissors.ogg',
+            'lizard': 'assets/sounds/rsp/lizard.ogg',
+            'spock': 'assets/sounds/rsp/spock.ogg'
+        }
+
+        from kivy.core.audio import SoundLoader
+
+        for key, path in sound_files.items():
+            if os.path.exists(path):
+                sound = SoundLoader.load(path)
+                if sound:
+                    sound.volume = 0.8  # Громкость для звуков результатов
+                    self.result_sounds[key] = sound
+                    print(f"✅ Loaded sound: {path}")
+                else:
+                    print(f"⚠️ Failed to load sound: {path}")
+            else:
+                print(f"⚠️ Sound file not found: {path}")
+
+    def play_result_sound(self, result):
+        """Воспроизводит звук для выпавшего результата"""
+        if result in self.result_sounds:
+            sound = self.result_sounds[result]
+            # Останавливаем звук спиннера, если он еще играет
+            if self.spin_sound and self.spin_sound.state == 'play':
+                self.spin_sound.stop()
+                self.spin_sound = None
+
+            # Воспроизводим звук результата
+            sound.play()
+            print(f"🔊 Playing result sound: {result}")
+        else:
+            print(f"⚠️ No sound loaded for result: {result}")
+
     def start_spin(self, instance):
         """Запускает вращение спиннера (против часовой стрелки)"""
         if self.is_spinning or not self.current_spinner:
             return
 
         print("🎡 Spin button pressed - starting rotation (counter-clockwise)")
+
+        # Воспроизводим звук вращения спиннера
+        self.play_spin_sound()
 
         self.is_spinning = True
         self.result_text = "ВРАЩЕНИЕ..."
@@ -426,7 +546,7 @@ class RSPScreen(GameScreen):
         print(f"Selected target base angle: {target_base_angle}°")
 
         # Добавляем случайное количество полных оборотов (вращение против часовой стрелки)
-        full_rotations = random.randint(8, 12)  # 8-12 полных оборотов
+        full_rotations = random.randint(16, 24)  # 16-24 полных оборотов
 
         # Для вращения против часовой стрелки используем отрицательный угол
         # Целевой угол будет меньше текущего
@@ -442,7 +562,7 @@ class RSPScreen(GameScreen):
         # Создаем анимацию с вращением против часовой стрелки
         anim = Animation(
             angle=target_angle,
-            duration=16.0,  # 16 секунд вращения
+            duration=14.0,  # 14 секунд вращения
             t='out_quad'  # Плавное замедление в конце
         )
 
@@ -456,16 +576,26 @@ class RSPScreen(GameScreen):
         self.current_animation = anim
 
         # Запускаем таймер на случай, если анимация не завершится
-        self.spin_timer = Clock.schedule_once(self._force_stop_spin, 18.0)
+        self.spin_timer = Clock.schedule_once(self._force_stop_spin, 16.0)  # 16 секунд (запас 2 секунды)
 
     def _on_spin_complete(self, animation, widget):
         """Когда вращение завершено (как в рулетке)"""
         print("🛑 Спиннер остановился")
 
+        # Проверяем, не закрывается ли приложение
+        if not hasattr(self, 'layout') or not self.layout:
+            print("⚠️ Layout уже уничтожен, останавливаем обработку")
+            return
+
         # Отменяем таймер
         if self.spin_timer:
             self.spin_timer.cancel()
             self.spin_timer = None
+
+        # Проверяем, существует ли еще виджет
+        if not widget or widget not in self.layout.children:
+            print("⚠️ Widget уже уничтожен, останавливаем обработку")
+            return
 
         # Нормализуем угол (приводим к положительному значению 0-360)
         normalized_angle = widget.angle % 360
@@ -474,10 +604,8 @@ class RSPScreen(GameScreen):
 
         # Определяем шаг в зависимости от режима
         if self.game_type == 'classic':
-            step = 120
             valid_angles = [0, 120, 240]
         else:
-            step = 72
             valid_angles = [0, 72, 144, 216, 288]
 
         # Находим ближайший допустимый угол
@@ -494,6 +622,11 @@ class RSPScreen(GameScreen):
     def _force_stop_spin(self, dt):
         """Принудительная остановка через таймер (как в рулетке)"""
         print("⏰ Таймер: принудительная остановка спиннера")
+
+        # Проверяем, не закрывается ли приложение
+        if not hasattr(self, 'layout') or not self.layout:
+            print("⚠️ Layout уже уничтожен, останавливаем обработку")
+            return
 
         if self.is_spinning and self.current_animation:
             self.current_animation.stop(self.current_spinner)
@@ -522,9 +655,16 @@ class RSPScreen(GameScreen):
         """Завершение вращения с показом результата"""
         self.is_spinning = False
 
-        # Возвращаем кнопку в зелёный цвет и включаем
-        self.spin_button.is_active = 1
-        self.spin_button.disabled = False
+        # Проверяем, существует ли еще spin_button
+        if self.spin_button:
+            # Возвращаем кнопку в зелёный цвет и включаем
+            self.spin_button.is_active = 1
+            self.spin_button.disabled = False
+
+        # Проверяем, существует ли current_spinner
+        if not self.current_spinner:
+            print("⚠️ current_spinner is None, cannot determine result")
+            return
 
         # Определяем результат по углу остановки
         current_angle = self.current_spinner.angle % 360
@@ -540,6 +680,9 @@ class RSPScreen(GameScreen):
 
         print(f"Результат по углу: {result}")
         self.show_result(result)
+
+        # Воспроизводим звук результата
+        self.play_result_sound(result)
 
     def show_result(self, result):
         """Показывает результат вращения"""
@@ -586,19 +729,40 @@ class RSPScreen(GameScreen):
         print(f"Game type switched to: {self.game_type}")
 
     def clear_ui(self):
-        """Очищает все виджеты интерфейса кроме фона"""
+        """Очищает все виджеты интерфейса кроме фона и кнопки назад"""
         if not hasattr(self, 'layout') or not self.layout:
             return
 
+        # Сохраняем ссылку на кнопку назад
+        back_button = self.back_button
+
         for child in self.layout.children[:]:
-            if child != self.bg_image:
+            # Удаляем все, кроме фона и кнопки назад
+            if child != self.bg_image and child != back_button:
                 self.layout.remove_widget(child)
 
         self.spin_button = None
         self.title_label = None
         self.type_switch_button = None
-        self.back_button = None
         self.spinner_image_3 = None
         self.spinner_image_5 = None
         self.current_spinner = None
         self.winner_image = None
+
+    def play_spin_sound(self):
+        """Воспроизводит звук вращения спиннера"""
+        from kivy.core.audio import SoundLoader
+
+        sound_path = 'assets/sounds/rsp/spinner_14.ogg'
+
+        if os.path.exists(sound_path):
+            # Загружаем звук и СОХРАНЯЕМ ссылку
+            self.spin_sound = SoundLoader.load(sound_path)
+            if self.spin_sound:
+                self.spin_sound.volume = 0.7
+                self.spin_sound.play()
+                print(f"🎵 Playing spin sound: {sound_path}")
+            else:
+                print(f"⚠️ Failed to load spin sound: {sound_path}")
+        else:
+            print(f"⚠️ Spin sound file not found: {sound_path}")
