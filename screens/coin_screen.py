@@ -9,7 +9,8 @@ from kivy.properties import NumericProperty, BooleanProperty, ColorProperty, Lis
 from kivy.core.window import Window
 from kivy.core.image import Image as CoreImage
 from kivy.core.audio import SoundLoader
-from kivy.graphics import Color, Ellipse, Rectangle, PushMatrix, PopMatrix, Rotate, Translate, Scale
+from kivy.graphics import Color, Ellipse, Rectangle, Line, PushMatrix, PopMatrix, Rotate, Translate, \
+    Scale
 import random
 import os
 import math
@@ -67,7 +68,7 @@ class SpritesheetCoin(Image):
     current_frame = NumericProperty(0)
     is_animating = BooleanProperty(False)
     frames = ListProperty([])
-    rotation_angle = NumericProperty(-90)  # ИЗМЕНЕНО: теперь -90 градусов (против часовой стрелки)
+    rotation_angle = NumericProperty(-90)  # Поворот против часовой стрелки
 
     # Флаг для зеркального отображения монеты
     coin_mirror = NumericProperty(1)
@@ -79,10 +80,14 @@ class SpritesheetCoin(Image):
     ellipse_offset_x = NumericProperty(0)
     ellipse_offset_y = NumericProperty(0)
 
-    # ФИКСИРОВАННЫЕ параметры тени
+    # Дополнительное смещение для позиционирования монеты (в пикселях)
+    extra_offset_x = NumericProperty(0)
+    extra_offset_y = NumericProperty(0)
+
+    # Параметры тени - теперь они будут использоваться в отрисовке!
     shadow_offset_x = NumericProperty(0)
     shadow_offset_y = NumericProperty(0)
-    shadow_scale_y = NumericProperty(0.9)
+    shadow_scale_y = NumericProperty(1)
     shadow_alpha = NumericProperty(0.6)
 
     # Номер текущего блока спрайт-листа (1-4)
@@ -99,8 +104,8 @@ class SpritesheetCoin(Image):
 
     def __init__(self, spritesheet_path, frame_width=64, frame_height=64,
                  cols=10, rows=10, total_frames=96, frames_per_block=24, start_frame=0,
-                 shadow_offset_x=-13.2, shadow_offset_y=12.1,
-                 shadow_scale_y=0.9, shadow_alpha=0.6, **kwargs):
+                 shadow_offset_x=0, shadow_offset_y=0,
+                 shadow_scale_y=1.0, shadow_alpha=0.6, **kwargs):
         super().__init__(**kwargs)
 
         self.frame_width = frame_width
@@ -133,12 +138,21 @@ class SpritesheetCoin(Image):
         # Устанавливаем начальный диапазон (первые 24 кадра - блок 1)
         self.set_animation_range(0, 23, block_num=1)
 
+        # Привязываем все свойства, влияющие на отрисовку
         self.bind(texture=self._update_rotation)
         self.bind(pos=self._update_rotation, size=self._update_rotation)
         self.bind(rotation_angle=self._update_rotation)
         self.bind(ellipse_offset_x=self._update_position,
-                  ellipse_offset_y=self._update_position)
+                  ellipse_offset_y=self._update_position,
+                  extra_offset_x=self._update_position,
+                  extra_offset_y=self._update_position)
         self.bind(coin_mirror=self._update_rotation)
+
+        # ВАЖНО: Привязываем свойства тени к обновлению отрисовки
+        self.bind(shadow_offset_x=self._update_rotation,
+                  shadow_offset_y=self._update_rotation,
+                  shadow_scale_y=self._update_rotation,
+                  shadow_alpha=self._update_rotation)
 
     def load_spritesheet(self):
         """Загружает единый спрайт-лист 10x10 (96 кадров)"""
@@ -211,21 +225,18 @@ class SpritesheetCoin(Image):
         center_y = self.y + self.height / 2
 
         with self.canvas:
-            # ===== ОТЛАДОЧНЫЕ КВАДРАТЫ В ЦЕНТРЕ =====
-            # (можно закомментировать или удалить в продакшене)
-            # Color(1, 0, 0, 0.3)  # Красный полупрозрачный
-            # Rectangle(pos=(center_x - self.width / 2, center_y - self.height / 2),
-            #           size=(self.width, self.height))
-            #
-            # Color(1, 1, 0, 0.3)  # Желтый полупрозрачный
-            # Rectangle(pos=(center_x - self.width / 2, center_y - self.height / 2),
-            #           size=(self.width, self.height))
-
             # ===== ТЕНЬ =====
             PushMatrix()
             Translate(center_x, center_y)
-            Scale(1, self.shadow_scale_y, 1)
             Rotate(angle=self.rotation_angle, origin=(0, 0))
+
+            # ИСПРАВЛЕНО: Используем свойства shadow_offset_x и shadow_offset_y
+            # которые теперь можно менять динамически!
+            Translate(self.shadow_offset_x, self.shadow_offset_y)
+
+            # Применяем масштабирование тени (отрицательный Scale для отражения по Y)
+            Scale(1, -abs(self.shadow_scale_y), 1)
+
             Translate(-center_x, -center_y)
 
             Color(0, 0, 0, self.shadow_alpha)
@@ -233,22 +244,17 @@ class SpritesheetCoin(Image):
             PopMatrix()
 
             # ===== МОНЕТА =====
-            # Сохраняем текущую матрицу для всех копий
             PushMatrix()
             Translate(center_x, center_y)
             Scale(self.coin_mirror, 1, 1)
             Rotate(angle=self.rotation_angle, origin=(0, 0))
             Translate(-center_x, -center_y)
 
-            # Если включен режим множественных копий и есть история
             if self.multi_copy_mode and len(self.frame_history) > 0:
-                # Рисуем ВСЕ копии из истории с одинаковой прозрачностью
-                # ВСЕ копии используют ТЕКУЩИЙ поворот, так как матрица уже применена
+                # Рисуем историю кадров (копии)
                 for i, frame_data in enumerate(self.frame_history):
                     frame_texture = frame_data['texture']
-
-                    # Небольшое смещение для копий, чтобы создать эффект множественности
-                    # (опционально, можно убрать если не нужно)
+                    # Небольшое случайное смещение для копий
                     offset_x = (i - len(self.frame_history) / 2) * 2
                     offset_y = (i - len(self.frame_history) / 2) * 2
 
@@ -259,26 +265,30 @@ class SpritesheetCoin(Image):
                         size=self.size
                     )
 
-                # Рисуем текущий кадр поверх с той же прозрачностью
-                Color(1.3, 1.3, 1.3, self.copy_opacity)
+                # Рисуем текущий кадр
+                Color(1.3, 1.3, 1.3, 1)
                 Rectangle(texture=self.texture, pos=self.pos, size=self.size)
             else:
-                # Обычный режим - одна монета с полной непрозрачностью
+                # Обычный режим - только текущий кадр
                 Color(1.3, 1.3, 1.3, 1)
                 Rectangle(texture=self.texture, pos=self.pos, size=self.size)
 
             PopMatrix()
 
     def _update_position(self, *args):
-        """Обновляет позицию монеты на эллипсе"""
-        center_x = 0.35
-        center_y = 0.5
+        """Обновляет позицию монеты на эллипсе с учетом дополнительного смещения в пикселях"""
+        base_center_x = 0.35
+        base_center_y = 0.5
 
+        # Применяем базовое смещение по эллипсу
+        # Дополнительное смещение в пикселях преобразуем в относительные координаты
+        # Так как pos_hint использует относительные координаты (0-1)
         self.pos_hint = {
-            'center_x': center_x + self.ellipse_offset_x,
-            'center_y': center_y + self.ellipse_offset_y
+            'center_x': base_center_x + self.ellipse_offset_x + (self.extra_offset_x / Window.width),
+            'center_y': base_center_y + self.ellipse_offset_y + (self.extra_offset_y / Window.height)
         }
 
+        # После изменения позиции обновляем отрисовку
         Clock.schedule_once(lambda dt: self._update_rotation(), 0.05)
 
     def start_animation(self, fps=60, frame_step=1, multi_copy_mode=False, copy_count=4, copy_opacity=0.4):
@@ -382,12 +392,14 @@ class SpritesheetCoin(Image):
         self._update_rotation()
 
     def reset_to_first_animation(self, start_frame=0):
-        """Сбрасывает монету к первому блоку (первые 24 кадра) с указанным начальным кадром"""
+        """Сбрасывает монету к первому блоку (первые 24 кадра) с указанным начальным кадром и обнуляет смещение"""
         self.stop_animation()
         self.set_animation_range(0, 23, block_num=1)
+        self.extra_offset_x = 0  # Сбрасываем дополнительное смещение в пикселях
+        self.extra_offset_y = 0
         if 0 <= start_frame < len(self.frames):
             self.texture = self.frames[start_frame]
-            print(f"🎬 Сброс к первому блоку, кадр: {start_frame + 1}")
+            print(f"🎬 Сброс к первому блоку, кадр: {start_frame + 1}, смещение обнулено")
 
 
 class CoinScreen(BaseGameScreen):
@@ -412,6 +424,16 @@ class CoinScreen(BaseGameScreen):
         self.tails_count = 0
         self.coin_start_frame = 0
         self.coin_start_side = 0
+
+        # Высота монеты для расчета смещения (в пикселях)
+        self.coin_height = 55
+        # Шаг смещения монеты - 1/12 высоты монеты, отрицательное значение для смещения влево
+        self.shift_step = -self.coin_height / 24  # 1/12 от высоты, отрицательное = смещение влево
+
+        # Начальное смещение тени (полная высота вниз)
+        self.initial_shadow_offset = -self.coin_height * 1  # -55 пикселей
+        # Текущее смещение тени
+        self.current_shadow_offset = self.initial_shadow_offset
 
     def on_enter(self):
         super().on_enter()
@@ -481,8 +503,10 @@ class CoinScreen(BaseGameScreen):
 
         # Размер монеты
         coin_size = 55
-        shadow_offset_x = coin_size * 1
-        shadow_offset_y = coin_size * 1
+        self.coin_height = coin_size  # Сохраняем высоту для расчетов
+        self.shift_step = -self.coin_height / 24  # Обновляем шаг смещения (1/12 высоты)
+        self.initial_shadow_offset = -self.coin_height * 0.97 # чтобы тень была ПОД монетой
+        self.current_shadow_offset = self.initial_shadow_offset
 
         # Случайно выбираем начальную сторону монеты (0 - орел/кадр 0, 1 - решка/кадр 11)
         self.coin_start_side = random.randint(0, 1)
@@ -501,15 +525,15 @@ class CoinScreen(BaseGameScreen):
             total_frames=96,
             frames_per_block=24,
             start_frame=self.coin_start_frame,
-            rotation_angle=-90,  # ИЗМЕНЕНО: теперь -90 градусов (против часовой стрелки)
+            rotation_angle=-90,  # Поворот против часовой стрелки
             size_hint=(None, None),
             size=(coin_size, coin_size),
             pos_hint={'center_x': center_x - a - image_shift, 'center_y': 0.5},
             allow_stretch=True,
-            shadow_offset_x=shadow_offset_x,
-            shadow_offset_y=shadow_offset_y,
-            shadow_scale_y=0.9,
-            shadow_alpha=0.6
+            shadow_offset_x=0,
+            shadow_offset_y=self.initial_shadow_offset,  # Начальное смещение тени
+            shadow_scale_y=1.0,
+            shadow_alpha=0.5
         )
 
         self.coin.ellipse_offset_x = -a
@@ -525,27 +549,6 @@ class CoinScreen(BaseGameScreen):
 
         self.touch_area.bind(on_touch_down=self.on_area_touch)
 
-        self.info_label = Label(
-            text='👆 Нажмите на монету',
-            color=(1, 1, 0.9, 0.9),
-            size_hint=(None, None),
-            size=(400, 50),
-            pos_hint={'center_x': 0.5, 'center_y': 0.15},
-            font_size=20,
-            bold=True
-        )
-        self.layout.add_widget(self.info_label)
-
-        self.stats_label = Label(
-            text='Бросков: 0',
-            color=(1, 1, 0.9, 0.7),
-            size_hint=(None, None),
-            size=(300, 40),
-            pos_hint={'center_x': 0.5, 'center_y': 0.08},
-            font_size=18
-        )
-        self.layout.add_widget(self.stats_label)
-
     def on_area_touch(self, instance, touch):
         if instance.collide_point(*touch.pos):
             self.flip_coin()
@@ -560,8 +563,10 @@ class CoinScreen(BaseGameScreen):
         # Воспроизводим звук вращения
         self.play_flip_sound()
 
-        # Сбрасываем к первому блоку с текущим начальным кадром
+        # Сбрасываем к первому блоку с текущим начальным кадром и начальным смещением тени
         self.coin.reset_to_first_animation(self.coin_start_frame)
+        self.coin.shadow_offset_y = self.initial_shadow_offset
+        self.current_shadow_offset = self.initial_shadow_offset
 
         result = random.randint(0, 1)
 
@@ -573,9 +578,6 @@ class CoinScreen(BaseGameScreen):
             self.tails_count += 1
             result_text = 'РЕШКА'
 
-        self.stats_label.text = f'Бросков: {self.total_flips} | Орел: {self.heads_count} | Решка: {self.tails_count}'
-        print(f"🎲 Результат: {result_text}")
-
         # НАСТРОЙКИ АНИМАЦИИ
         # =================
 
@@ -584,9 +586,6 @@ class CoinScreen(BaseGameScreen):
         base_frame_step = 2
 
         # Количество копий для разных этапов
-        stage1_copy_count = 4  # 4 копии для первого этапа (в движении)
-        stage1_copy_opacity = 0.4
-
         stage2_copy_count = 2  # 2 копии для второго этапа (на месте)
         stage2_copy_opacity = 0.4
 
@@ -600,99 +599,74 @@ class CoinScreen(BaseGameScreen):
         stage5_copy_opacity = 0.4
 
         # Длительности этапов
-        move_duration = 12.0  # УВЕЛИЧЕНО: Вращение с копиями в движении (было 5.0, стало 12.0)
         center_duration = 2.0  # Вращение с копиями на месте
         block_duration = 1.5  # Длительность каждого блока (2, 3, 4)
 
+        # Шаг смещения монеты в пикселях (отрицательный для смещения влево) - 1/12 высоты
+        step_x = self.shift_step
+
+        # Коэффициент уменьшения смещения тени (1/3 с каждым переходом)
+        shadow_reduction_factor = 11
+
         print(f"\n=== ПОРЯДОК АНИМАЦИИ ===")
-        print(f"1. Вращение с {stage1_copy_count} копиями В ДВИЖЕНИИ: {move_duration} сек (ЗАМЕДЛЕНО)")
-        print(f"2. Вращение с {stage2_copy_count} копиями НА МЕСТЕ: {center_duration} сек")
-        print(f"3. Блок 2 (кадры 24-47) с {stage3_copy_count} копиями: {block_duration} сек")
-        print(f"4. Блок 3 (кадры 48-71) с {stage4_copy_count} копиями: {block_duration} сек")
-        print(f"5. Блок 4 (кадры 72-95) с {stage5_copy_count} копиями: {block_duration} сек")
-        print(f"6. Показ результата\n")
+        print(f"1. Блок 1 (кадры 0-23) с {stage2_copy_count} копиями НА МЕСТЕ: {center_duration} сек")
+        print(f"   Смещение монеты: 0px, Смещение тени: {self.current_shadow_offset:.2f}px")
+        print(f"2. Блок 2 (кадры 24-47) с {stage3_copy_count} копиями: {block_duration} сек")
+        print(
+            f"   Смещение монеты: {step_x:.2f}px, Смещение тени: {self.current_shadow_offset * (shadow_reduction_factor):.2f}px")
+        print(f"3. Блок 3 (кадры 48-71) с {stage4_copy_count} копиями: {block_duration} сек")
+        print(
+            f"   Смещение монеты: {step_x * 2:.2f}px, Смещение тени: {self.current_shadow_offset * (shadow_reduction_factor ** 2):.2f}px")
+        print(f"4. Блок 4 (кадры 72-95) с {stage5_copy_count} копиями: {block_duration} сек")
+        print(
+            f"   Смещение монеты: {step_x * 3:.2f}px, Смещение тени: {self.current_shadow_offset * (shadow_reduction_factor ** 3):.2f}px")
+        print(f"5. Показ результата\n")
 
-        # СОЗДАЕМ АНИМАЦИЮ ДВИЖЕНИЯ ПО СПИРАЛИ (с увеличенной длительностью)
-        spiral_anim = self.create_vertical_spiral_animation(duration=move_duration)
-
-        def on_move_complete(animation, widget):
-            print("⏱️ Этап 1 завершен - движение окончено")
-            print("⏱️ Этап 2 - вращение с копиями на месте")
-            self.start_center_rotation(
-                result,
-                base_fps,
-                base_frame_step,
-                stage2_copy_count,
-                stage2_copy_opacity,
-                center_duration,
-                base_fps, base_frame_step,
-                stage3_copy_count, stage3_copy_opacity,
-                stage4_copy_count, stage4_copy_opacity,
-                stage5_copy_count, stage5_copy_opacity,
-                block_duration
-            )
-
-        spiral_anim.bind(on_complete=on_move_complete)
-
-        # ЭТАП 1: Запускаем анимацию первого блока (кадры 0-23)
-        # с копиями ВО ВРЕМЯ ДВИЖЕНИЯ
-        print("🎬 ЭТАП 1: Вращение с копиями в движении (ЗАМЕДЛЕНО)")
+        # ЭТАП 1: Запускаем анимацию первого блока НА МЕСТЕ (без смещения монеты, с начальным смещением тени)
+        print("🎬 ЭТАП 1: Блок 1 - вращение с копиями на месте")
         self.coin.set_animation_range(0, 23, block_num=1)
-        spiral_anim.start(self.coin)
+        self.coin.extra_offset_x = 0  # Нулевое смещение монеты
+        # Устанавливаем смещение тени
+        self.coin.shadow_offset_y = self.current_shadow_offset
         self.coin.start_animation(
             fps=base_fps,
             frame_step=base_frame_step,
             multi_copy_mode=True,
-            copy_count=stage1_copy_count,
-            copy_opacity=stage1_copy_opacity
+            copy_count=stage2_copy_count,
+            copy_opacity=stage2_copy_opacity
         )
 
-    def start_center_rotation(self, result,
-                              fps1=30, frame_step1=2,
-                              copy_count1=2, copy_opacity1=0.4, duration1=2.0,
-                              fps2=30, frame_step2=2,
-                              copy_count2=2, copy_opacity2=0.4,
-                              copy_count3=2, copy_opacity3=0.4,
-                              copy_count4=2, copy_opacity4=0.4,
-                              block_duration=1.5):
-        """ЭТАП 2: Вращение с копиями на месте"""
-        print(f"⏱️ ЭТАП 2: Вращение с {copy_count1} копиями на месте {duration1} сек")
-
-        # Останавливаем текущую анимацию
-        self.coin.stop_animation()
-
-        # Возвращаемся к первому блоку (кадры 0-23) для вращения на месте
-        self.coin.set_animation_range(0, 23, block_num=1)
-
-        # Запускаем анимацию с копиями НА МЕСТЕ (без движения)
-        self.coin.start_animation(
-            fps=fps1,
-            frame_step=frame_step1,
-            multi_copy_mode=True,
-            copy_count=copy_count1,
-            copy_opacity=copy_opacity1
-        )
-
-        # Через указанное время переходим к блоку 2
+        # Через указанное время переходим к блоку 2 со смещением
         Clock.schedule_once(lambda dt: self.switch_to_block_2(
             result,
-            fps2, frame_step2,
-            copy_count2, copy_opacity2,
-            copy_count3, copy_opacity3,
-            copy_count4, copy_opacity4,
-            block_duration
-        ), duration1)
+            base_fps, base_frame_step,
+            stage3_copy_count, stage3_copy_opacity,
+            stage4_copy_count, stage4_copy_opacity,
+            stage5_copy_count, stage5_copy_opacity,
+            block_duration,
+            step_x,  # Передаем величину шага смещения монеты в пикселях
+            shadow_reduction_factor  # Передаем коэффициент уменьшения тени
+        ), center_duration)
 
     def switch_to_block_2(self, result,
                           fps=30, frame_step=2,
                           copy_count2=2, copy_opacity2=0.4,
                           copy_count3=2, copy_opacity3=0.4,
                           copy_count4=2, copy_opacity4=0.4,
-                          block_duration=1.5):
-        """ЭТАП 3: Блок 2 (кадры 24-47) с 2 копиями"""
-        print(f"⏱️ ЭТАП 3: Переключение на блок 2 (кадры 24-47) с {copy_count2} копиями")
+                          block_duration=1.5,
+                          step_x=-18,
+                          shadow_reduction_factor= 1 / 3):
+        """ЭТАП 2: Блок 2 со смещением монеты и уменьшенной тенью"""
+        # Уменьшаем смещение тени на 1/11 от высоты монеты
+        self.current_shadow_offset = self.initial_shadow_offset + (self.coin_height / shadow_reduction_factor)
+
+        print(f"⏱️ ЭТАП 2: Блок 2 (кадры 24-47) с {copy_count2} копиями")
+        print(f"   Смещение монеты: {step_x:.2f}px, Смещение тени: {self.current_shadow_offset:.2f}px")
+
         self.coin.stop_animation()
         self.coin.set_animation_range(24, 47, block_num=2)
+        self.coin.extra_offset_x = step_x  # Смещаем монету на 1/12 высоты влево
+        self.coin.shadow_offset_y = self.current_shadow_offset  # Устанавливаем новое смещение тени
         self.coin.start_animation(
             fps=fps,
             frame_step=frame_step,
@@ -701,24 +675,34 @@ class CoinScreen(BaseGameScreen):
             copy_opacity=copy_opacity2
         )
 
-        # Через block_duration секунды переключаемся на блок 3
         Clock.schedule_once(lambda dt: self.switch_to_block_3(
             result,
             fps, frame_step,
             copy_count3, copy_opacity3,
             copy_count4, copy_opacity4,
-            block_duration
+            block_duration,
+            step_x,
+            shadow_reduction_factor
         ), block_duration)
 
     def switch_to_block_3(self, result,
                           fps=30, frame_step=2,
                           copy_count3=2, copy_opacity3=0.4,
                           copy_count4=2, copy_opacity4=0.4,
-                          block_duration=1.5):
-        """ЭТАП 4: Блок 3 (кадры 48-71) с 2 копиями"""
-        print(f"⏱️ ЭТАП 4: Переключение на блок 3 (кадры 48-71) с {copy_count3} копиями")
+                          block_duration=1.5,
+                          step_x=-18,
+                          shadow_reduction_factor=1 / 2):
+        """ЭТАП 3: Блок 3 со смещением монеты и еще более уменьшенной тенью"""
+        # Уменьшаем смещение тени на 1/11 от высоты монеты * 2
+        self.current_shadow_offset = self.initial_shadow_offset + (self.coin_height / shadow_reduction_factor) * 2
+
+        print(f"⏱️ ЭТАП 3: Блок 3 (кадры 48-71) с {copy_count3} копиями")
+        print(f"   Смещение монеты: {step_x * 2:.2f}px, Смещение тени: {self.current_shadow_offset:.2f}px")
+
         self.coin.stop_animation()
         self.coin.set_animation_range(48, 71, block_num=3)
+        self.coin.extra_offset_x = step_x * 2  # Смещаем монету еще на 1/12 высоты (всего 2/12 = 1/6)
+        self.coin.shadow_offset_y = self.current_shadow_offset  # Устанавливаем новое смещение тени
         self.coin.start_animation(
             fps=fps,
             frame_step=frame_step,
@@ -727,34 +711,41 @@ class CoinScreen(BaseGameScreen):
             copy_opacity=copy_opacity3
         )
 
-        # Через block_duration секунды переключаемся на блок 4
         Clock.schedule_once(lambda dt: self.switch_to_block_4(
             result,
             fps, frame_step,
             copy_count4, copy_opacity4,
-            block_duration
+            block_duration,
+            step_x,
+            shadow_reduction_factor
         ), block_duration)
 
     def switch_to_block_4(self, result,
                           fps=30, frame_step=2,
                           copy_count4=2, copy_opacity4=0.4,
-                          block_duration=1.5):
-        """ЭТАП 5: Блок 4 (кадры 72-95) с 2 копиями - используем только половину кадров в зависимости от результата"""
+                          block_duration=1.5,
+                          step_x=-18,
+                          shadow_reduction_factor=1 / 3):
+        """ЭТАП 4: Блок 4 со смещением монеты и минимальной тенью"""
+        # Уменьшаем смещение тени на 1/11 от высоты монеты * 3
+        self.current_shadow_offset = self.initial_shadow_offset + (self.coin_height / shadow_reduction_factor) * 3
 
-        # Определяем диапазон кадров в зависимости от результата
-        if result == 0:  # Орёл - первые 12 кадров блока 4
+        if result == 0:
             start_frame = 72
             end_frame = 83
             side_name = "ОРЁЛ"
-        else:  # Решка - вторые 12 кадров блока 4
+        else:
             start_frame = 84
             end_frame = 95
             side_name = "РЕШКА"
 
-        print(f"⏱️ ЭТАП 5: Блок 4 (кадры {start_frame}-{end_frame}) для {side_name} с {copy_count4} копиями")
+        print(f"⏱️ ЭТАП 4: Блок 4 (кадры {start_frame}-{end_frame}) для {side_name} с {copy_count4} копиями")
+        print(f"   Смещение монеты: {step_x * 3:.2f}px, Смещение тени: {self.current_shadow_offset:.2f}px")
 
         self.coin.stop_animation()
         self.coin.set_animation_range(start_frame, end_frame, block_num=4)
+        self.coin.extra_offset_x = step_x * 3  # Смещаем монету еще на 1/12 высоты (всего 3/12 = 1/4 высоты)
+        self.coin.shadow_offset_y = self.current_shadow_offset  # Устанавливаем новое смещение тени
         self.coin.start_animation(
             fps=fps,
             frame_step=frame_step,
@@ -763,27 +754,21 @@ class CoinScreen(BaseGameScreen):
             copy_opacity=copy_opacity4
         )
 
-        # Через block_duration секунды показываем результат
         Clock.schedule_once(lambda dt: self.finish_rotation(result), block_duration)
 
     def finish_rotation(self, result):
-        """ЭТАП 6: Показ результата - останавливаем на конкретном кадре из 4-го блока"""
-        print("⏱️ ЭТАП 6: Показ результата")
+        """ЭТАП 5: Показ результата"""
+        print("⏱️ ЭТАП 5: Показ результата")
 
-        # Останавливаем анимацию
         self.coin.stop_animation()
 
-        # Выбираем конкретный кадр из 4-го блока в зависимости от результата
-        if result == 0:  # Орёл - кадр из первой половины 4-го блока
-            # Можно выбрать конкретный кадр, например 72 (первый кадр орла в 4-м блоке)
+        if result == 0:
             final_frame = 72
             side_name = "ОРЁЛ"
-        else:  # Решка - кадр из второй половины 4-го блока
-            # Можно выбрать конкретный кадр, например 84 (первый кадр решки в 4-м блоке)
+        else:
             final_frame = 84
             side_name = "РЕШКА"
 
-        # Устанавливаем финальный кадр
         if 0 <= final_frame < len(self.coin.frames):
             self.coin.texture = self.coin.frames[final_frame]
             print(f"🎯 Финальный кадр: {final_frame + 1} ({side_name})")
@@ -792,29 +777,8 @@ class CoinScreen(BaseGameScreen):
         self.stop_flip_sound()
 
     def create_vertical_spiral_animation(self, duration=12.0):
-        """Создает анимацию движения по спирали (замедленную)"""
-        steps = 200  # Увеличено количество шагов для более плавного движения
-        anim = Animation(duration=0)
-
-        a = 0.15
-        b = 0.4
-
-        for i in range(steps):
-            t = i / steps
-            radius_factor = 1 - t
-            angle = math.pi + t * 8 * math.pi
-            x_offset = a * radius_factor * math.cos(angle)
-            y_offset = b * radius_factor * math.sin(angle)
-
-            step_anim = Animation(
-                ellipse_offset_x=x_offset,
-                ellipse_offset_y=y_offset,
-                duration=duration / steps,
-                t='linear'
-            )
-            anim += step_anim
-
-        return anim
+        """Создает анимацию движения по спирали (НЕ ИСПОЛЬЗУЕТСЯ)"""
+        return Animation(duration=0)
 
     def go_to_menu(self):
         if self.coin:
