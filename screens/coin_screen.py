@@ -737,12 +737,6 @@ class CoinScreen(BaseGameScreen):
         # Устанавливаем диапазон от 12 до 107 (все оставшиеся кадры)
         self.coin.set_animation_range(12, 107)
 
-        # Запускаем анимацию кадров
-        self.coin.start_animation(
-            fps=fps,
-            frame_step=frame_step
-        )
-
         # Рассчитываем время на прокрутку всех кадров
         frames_to_play = 96  # 107 - 12 + 1 = 96 кадров
         frame_duration = 1.0 / fps
@@ -752,23 +746,61 @@ class CoinScreen(BaseGameScreen):
         print(f"   Время прокрутки: {total_duration:.2f} сек")
         print(f"   Смещение влево: {abs(self.final_offset_x_pixels)} пикселей")
 
-        # Создаем и запускаем анимацию смещения влево, синхронизированную по времени с прокруткой кадров
+        # Устанавливаем начальный кадр
+        self.coin.current_frame = 12
+        self.coin.texture = self.coin.frames[12]
+
+        # Создаем и запускаем анимацию смещения влево
         offset_anim = Animation(
-            extra_offset_x=self.final_offset_x_pixels,  # Отрицательное значение для смещения влево
+            extra_offset_x=self.final_offset_x_pixels,
             duration=total_duration,
-            t='linear'  # Линейное смещение для равномерного движения
+            t='linear'
         )
+
+        # Вместо циклической анимации используем Clock.schedule_once для последовательной смены кадров
+        self.coin.is_animating = True
+
+        def update_frame(dt):
+            if not self.coin.is_animating:
+                return False
+
+            # Переходим к следующему кадру
+            next_frame = self.coin.current_frame + 1
+
+            # Проверяем, не дошли ли до конца
+            if next_frame > 107:  # Последний кадр для прокрутки
+                print(f"✅ Достигнут 108 кадр, останавливаем анимацию")
+                self.coin.is_animating = False
+                self.finish_rotation(result)
+                return False
+
+            # Устанавливаем следующий кадр
+            self.coin.current_frame = next_frame
+            self.coin.texture = self.coin.frames[next_frame]
+            self.coin._update_rotation()
+
+            if self.debug_mode:
+                print(f"🎞️ Кадр: {next_frame + 1}/108")
+
+            return True  # Продолжаем анимацию
+
+        # Запускаем периодическое обновление кадров
+        frame_interval = 1.0 / fps
+        Clock.schedule_interval(update_frame, frame_interval)
+
+        # Сохраняем ссылку на событие, чтобы можно было остановить
+        self.animation_event = update_frame
 
         def on_offset_complete(animation, coin):
             print("✅ Смещение влево завершено")
-            self.finish_rotation(result)
+            # Не вызываем finish_rotation здесь, так как кадры уже должны были закончиться
 
         offset_anim.bind(on_complete=on_offset_complete)
         offset_anim.start(self.coin)
 
-        # Запланируем завершение на случай, если анимация смещения не сработает
+        # Страховка - если кадры почему-то не закончились вовремя
         Clock.schedule_once(lambda dt: self.finish_rotation(result) if self.coin.is_animating else None,
-                           total_duration + 0.05)
+                            total_duration + 0.1)
 
     def finish_rotation(self, result):
         """Этап 4: Показ результата"""
