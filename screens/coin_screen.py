@@ -234,22 +234,15 @@ class SpritesheetCoin(Image):
         with self.canvas:
             # ===== ТЕНЬ =====
             PushMatrix()
-            # Перемещаемся к центру монеты
             Translate(center_x, center_y)
-            # Применяем поворот
             Rotate(angle=self.rotation_angle, origin=(0, 0))
-            # Смещаем тень относительно центра
             Translate(self.shadow_offset_x, self.shadow_offset_y)
-            # Отражаем по X для зеркального отображения
-            Scale(-1, -abs(self.shadow_scale_y), 1)
-            # Возвращаемся к исходной точке для отрисовки
+            # Применяем масштабирование тени (отрицательный Scale для отражения по Y)
+            Scale(1, -abs(self.shadow_scale_y), 1)
             Translate(-center_x, -center_y)
 
-            # Рисуем тень с зеркальным отражением
             Color(0, 0, 0, self.shadow_alpha)
-            Rectangle(texture=self.texture,
-                      pos=(self.x, self.y),  # Сдвигаем начало отрисовки в правый край
-                      size=(self.width, self.height))
+            Rectangle(texture=self.texture, pos=self.pos, size=self.size)
             PopMatrix()
 
             # ===== МОНЕТА =====
@@ -262,6 +255,7 @@ class SpritesheetCoin(Image):
             # Только одна монета, без копий
             Color(1.3, 1.3, 1.3, self.coin_opacity)
             Rectangle(texture=self.texture, pos=self.pos, size=self.size)
+
             PopMatrix()
 
         self._updating = False
@@ -432,9 +426,12 @@ class CoinScreen(BaseGameScreen):
         # Высота монеты для расчета смещения (в пикселях)
         self.coin_height = 55
 
-        # Начальное смещение тени
+        # Начальное смещение тени (как в том файле)
         self.initial_shadow_offset = -self.coin_height * 0.97
         self.current_shadow_offset = self.initial_shadow_offset
+
+        # Коэффициент уменьшения смещения тени (как в том файле)
+        self.shadow_reduction_factor = 11
 
         # Параметры для движения по эллипсу
         self.ellipse_radius_x = 0.15
@@ -543,7 +540,7 @@ class CoinScreen(BaseGameScreen):
             initial_spritesheet = self.spritesheet_path_2
             print(f"🎲 Начальная сторона: РЕШКА, спрайт-лист: 2, кадр: 1")
 
-        # СОЗДАЕМ МОНЕТУ
+        # СОЗДАЕМ МОНЕТУ - убираем дополнительное смещение тени
         spritesheet_paths = {
             'heads': self.spritesheet_path_1,
             'tails': self.spritesheet_path_2
@@ -563,7 +560,7 @@ class CoinScreen(BaseGameScreen):
             pos_hint={'center_x': center_x - a - image_shift, 'center_y': 0.5},
             allow_stretch=True,
             shadow_offset_x=0,
-            shadow_offset_y=self.initial_shadow_offset + self.coin_height * 0.15,
+            shadow_offset_y=self.initial_shadow_offset + self.coin_height * 0.13,
             shadow_scale_y=1.0,
             shadow_alpha=0.5,
             coin_opacity=1.0,
@@ -687,6 +684,7 @@ class CoinScreen(BaseGameScreen):
         print(f"3. Финальная прокрутка всех кадров со смещением (12-107)")
         print(f"   Всего кадров: 96 (12-107)")
         print(f"   Смещение влево: {abs(self.final_offset_x_pixels)} пикселей")
+        print(f"   Начальное смещение тени: {self.current_shadow_offset:.2f}px")
 
         # ЭТАП 1: Движение по спирали с анимацией первых 12 кадров
         print("🎬 ЭТАП 1: Движение по спирали (первые 12 кадров)")
@@ -712,6 +710,7 @@ class CoinScreen(BaseGameScreen):
         Этап 2: Вращение в центре (первые 12 кадров)
         """
         print(f"⏱️ ЭТАП 2: Вращение в центре - {duration} сек (первые 12 кадров)")
+        print(f"   Текущее смещение тени: {self.current_shadow_offset:.2f}px")
 
         # Убеждаемся, что монета в центре
         self.coin.spiral_factor = 0
@@ -745,19 +744,30 @@ class CoinScreen(BaseGameScreen):
         print(f"   Кадров для прокрутки: {frames_to_play}")
         print(f"   Время прокрутки: {total_duration:.2f} сек")
         print(f"   Смещение влево: {abs(self.final_offset_x_pixels)} пикселей")
+        print(f"   Начальное смещение тени: {self.current_shadow_offset:.2f}px")
 
         # Устанавливаем начальный кадр
         self.coin.current_frame = 12
         self.coin.texture = self.coin.frames[12]
 
-        # Создаем и запускаем анимацию смещения влево
+        # Создаем анимацию смещения влево
         offset_anim = Animation(
             extra_offset_x=self.final_offset_x_pixels,
             duration=total_duration,
             t='linear'
         )
 
-        # Вместо циклической анимации используем Clock.schedule_once для последовательной смены кадров
+        # Создаем анимацию для тени (постепенно поднимаем тень вверх)
+        # Рассчитываем конечное смещение тени (поднимем на 30% от начального смещения)
+        target_shadow_offset = self.initial_shadow_offset * 0.1  # Тень поднимается на 30%
+
+        shadow_anim = Animation(
+            shadow_offset_y=target_shadow_offset,
+            duration=total_duration,
+            t='linear'
+        )
+
+        # Запускаем анимацию кадров через Clock.schedule_interval
         self.coin.is_animating = True
 
         def update_frame(dt):
@@ -780,7 +790,7 @@ class CoinScreen(BaseGameScreen):
             self.coin._update_rotation()
 
             if self.debug_mode:
-                print(f"🎞️ Кадр: {next_frame + 1}/108")
+                print(f"🎞️ Кадр: {next_frame + 1}/108, тень: {self.coin.shadow_offset_y:.2f}px")
 
             return True  # Продолжаем анимацию
 
@@ -788,15 +798,13 @@ class CoinScreen(BaseGameScreen):
         frame_interval = 1.0 / fps
         Clock.schedule_interval(update_frame, frame_interval)
 
-        # Сохраняем ссылку на событие, чтобы можно было остановить
-        self.animation_event = update_frame
+        def on_anim_complete(animation, coin):
+            print("✅ Анимации смещения и тени завершены")
 
-        def on_offset_complete(animation, coin):
-            print("✅ Смещение влево завершено")
-            # Не вызываем finish_rotation здесь, так как кадры уже должны были закончиться
-
-        offset_anim.bind(on_complete=on_offset_complete)
+        # Запускаем анимации
+        offset_anim.bind(on_complete=on_anim_complete)
         offset_anim.start(self.coin)
+        shadow_anim.start(self.coin)
 
         # Страховка - если кадры почему-то не закончились вовремя
         Clock.schedule_once(lambda dt: self.finish_rotation(result) if self.coin.is_animating else None,
