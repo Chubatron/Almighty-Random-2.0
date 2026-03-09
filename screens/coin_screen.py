@@ -234,14 +234,22 @@ class SpritesheetCoin(Image):
         with self.canvas:
             # ===== ТЕНЬ =====
             PushMatrix()
+            # Перемещаемся к центру монеты
             Translate(center_x, center_y)
+            # Применяем поворот
             Rotate(angle=self.rotation_angle, origin=(0, 0))
+            # Смещаем тень относительно центра
             Translate(self.shadow_offset_x, self.shadow_offset_y)
-            Scale(1, -abs(self.shadow_scale_y), 1)
+            # Отражаем по X для зеркального отображения
+            Scale(-1, -abs(self.shadow_scale_y), 1)
+            # Возвращаемся к исходной точке для отрисовки
             Translate(-center_x, -center_y)
 
+            # Рисуем тень с зеркальным отражением
             Color(0, 0, 0, self.shadow_alpha)
-            Rectangle(texture=self.texture, pos=self.pos, size=self.size)
+            Rectangle(texture=self.texture,
+                      pos=(self.x, self.y),  # Сдвигаем начало отрисовки в правый край
+                      size=(self.width, self.height))
             PopMatrix()
 
             # ===== МОНЕТА =====
@@ -254,7 +262,6 @@ class SpritesheetCoin(Image):
             # Только одна монета, без копий
             Color(1.3, 1.3, 1.3, self.coin_opacity)
             Rectangle(texture=self.texture, pos=self.pos, size=self.size)
-
             PopMatrix()
 
         self._updating = False
@@ -435,6 +442,10 @@ class CoinScreen(BaseGameScreen):
         self.start_offset_x = -0.15
         self.start_offset_y = 0
 
+        # Смещение для финального этапа (четверть высоты монеты) - в пикселях
+        # Отрицательное значение для смещения влево
+        self.final_offset_x_pixels = -self.coin_height * 0.33
+
         # Флаг отладки
         self.debug_mode = True
 
@@ -512,6 +523,9 @@ class CoinScreen(BaseGameScreen):
         self.initial_shadow_offset = -self.coin_height * 0.97
         self.current_shadow_offset = self.initial_shadow_offset
 
+        # Смещение для финального этапа (отрицательное для смещения влево)
+        self.final_offset_x_pixels = -self.coin_height * 0.33
+
         # Случайно выбираем начальную сторону монеты
         self.current_side = random.randint(0, 1)
 
@@ -549,7 +563,7 @@ class CoinScreen(BaseGameScreen):
             pos_hint={'center_x': center_x - a - image_shift, 'center_y': 0.5},
             allow_stretch=True,
             shadow_offset_x=0,
-            shadow_offset_y=self.initial_shadow_offset,
+            shadow_offset_y=self.initial_shadow_offset + self.coin_height * 0.15,
             shadow_scale_y=1.0,
             shadow_alpha=0.5,
             coin_opacity=1.0,
@@ -653,6 +667,9 @@ class CoinScreen(BaseGameScreen):
         self.coin.ellipse_offset_y = 0
         self.coin.spiral_factor = 1.0
 
+        # Сбрасываем дополнительное смещение
+        self.coin.extra_offset_x = 0
+
         # НАСТРОЙКИ АНИМАЦИИ
         base_fps = 40
         base_frame_step = 1  # Без пропуска кадров для плавности
@@ -667,8 +684,9 @@ class CoinScreen(BaseGameScreen):
         print(f"   Анимация: первые 12 кадров (0-11)")
         print(f"2. Вращение в центре: {center_rotation_duration} сек")
         print(f"   Анимация: первые 12 кадров (0-11)")
-        print(f"3. Прокрутка всех кадров (12-107)")
+        print(f"3. Финальная прокрутка всех кадров со смещением (12-107)")
         print(f"   Всего кадров: 96 (12-107)")
+        print(f"   Смещение влево: {abs(self.final_offset_x_pixels)} пикселей")
 
         # ЭТАП 1: Движение по спирали с анимацией первых 12 кадров
         print("🎬 ЭТАП 1: Движение по спирали (первые 12 кадров)")
@@ -705,21 +723,21 @@ class CoinScreen(BaseGameScreen):
             frame_step=frame_step
         )
 
-        # Через указанное время переходим к прокрутке всех кадров
-        Clock.schedule_once(lambda dt: self.start_full_rotation(result, fps, frame_step), duration)
+        # Через указанное время переходим к финальной прокрутке всех кадров со смещением
+        Clock.schedule_once(lambda dt: self.start_final_rotation_with_offset(result, fps, frame_step), duration)
 
-    def start_full_rotation(self, result, fps, frame_step):
+    def start_final_rotation_with_offset(self, result, fps, frame_step):
         """
-        Этап 3: Прокрутка всех оставшихся кадров (12-107)
+        Этап 3: Финальная прокрутка всех кадров (12-107) с одновременным смещением влево
         """
-        print("⏱️ ЭТАП 3: Прокрутка всех кадров (12-107)")
+        print("⏱️ ЭТАП 3: Финальная прокрутка всех кадров со смещением влево (12-107)")
 
         self.coin.stop_animation()
 
         # Устанавливаем диапазон от 12 до 107 (все оставшиеся кадры)
         self.coin.set_animation_range(12, 107)
 
-        # Запускаем анимацию
+        # Запускаем анимацию кадров
         self.coin.start_animation(
             fps=fps,
             frame_step=frame_step
@@ -727,15 +745,30 @@ class CoinScreen(BaseGameScreen):
 
         # Рассчитываем время на прокрутку всех кадров
         frames_to_play = 96  # 107 - 12 + 1 = 96 кадров
-        # Вычитаем небольшое время, чтобы остановиться точно на последнем кадре, не допуская лишнего цикла
         frame_duration = 1.0 / fps
-        total_duration = (frames_to_play * frame_duration) - (frame_duration * 0.9)  # Останавливаемся чуть раньше
+        total_duration = frames_to_play * frame_duration
 
         print(f"   Кадров для прокрутки: {frames_to_play}")
-        print(f"   Время прокрутки: {total_duration:.2f} сек (с корректировкой)")
+        print(f"   Время прокрутки: {total_duration:.2f} сек")
+        print(f"   Смещение влево: {abs(self.final_offset_x_pixels)} пикселей")
 
-        # По окончании показываем результат
-        Clock.schedule_once(lambda dt: self.finish_rotation(result), total_duration)
+        # Создаем и запускаем анимацию смещения влево, синхронизированную по времени с прокруткой кадров
+        offset_anim = Animation(
+            extra_offset_x=self.final_offset_x_pixels,  # Отрицательное значение для смещения влево
+            duration=total_duration,
+            t='linear'  # Линейное смещение для равномерного движения
+        )
+
+        def on_offset_complete(animation, coin):
+            print("✅ Смещение влево завершено")
+            self.finish_rotation(result)
+
+        offset_anim.bind(on_complete=on_offset_complete)
+        offset_anim.start(self.coin)
+
+        # Запланируем завершение на случай, если анимация смещения не сработает
+        Clock.schedule_once(lambda dt: self.finish_rotation(result) if self.coin.is_animating else None,
+                           total_duration + 0.05)
 
     def finish_rotation(self, result):
         """Этап 4: Показ результата"""
@@ -751,7 +784,7 @@ class CoinScreen(BaseGameScreen):
             # Сбрасываем флаг обновления
             self.coin._updating = False
 
-        # Устанавливаем результат без задержки
+        # Устанавливаем результат
         self._show_result(result)
 
     def _show_result(self, result):
