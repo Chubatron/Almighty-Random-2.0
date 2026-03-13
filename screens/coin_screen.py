@@ -2,7 +2,8 @@ from kivy.uix.image import Image
 from kivy.uix.widget import Widget
 from kivy.animation import Animation
 from kivy.clock import Clock
-from kivy.properties import NumericProperty, BooleanProperty, ColorProperty, ListProperty, StringProperty
+from kivy.properties import NumericProperty, BooleanProperty, ColorProperty, ListProperty, StringProperty, \
+    ObjectProperty
 from kivy.core.window import Window
 from kivy.core.image import Image as CoreImage
 from kivy.core.audio import SoundLoader
@@ -11,14 +12,174 @@ from kivy.graphics import Color, Ellipse, Rectangle, Line, PushMatrix, PopMatrix
 import random
 import os
 import math
+from functools import partial
 
 from screens.base_game_screen import BaseGameScreen
+
+
+class DustParticle(Widget):
+    """Частица пыли/искры с анимацией"""
+    velocity_x = NumericProperty(0)
+    velocity_y = NumericProperty(0)
+    opacity = NumericProperty(1.0)
+    size_factor = NumericProperty(1.0)
+    color = ColorProperty((1, 1, 0.5, 0.8))  # Желтовато-оранжевый цвет
+    glow_intensity = NumericProperty(1.0)  # Интенсивность свечения
+    target_glow = NumericProperty(1.0)  # Целевая интенсивность для плавных переходов
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.size = (random.uniform(2, 5), random.uniform(2, 5))
+        self.velocity_x = random.uniform(-30, 30)
+        self.velocity_y = random.uniform(-30, 30)
+        self.opacity = random.uniform(0.3, 0.8)
+        self.color = (
+            random.uniform(0.8, 1.0),  # R - оранжево-желтый
+            random.uniform(0.5, 0.8),  # G
+            random.uniform(0.2, 0.4),  # B - мало синего
+            self.opacity
+        )
+        self.glow_intensity = 1.0
+        self.target_glow = 1.0
+
+        # Случайное начальное положение
+        self.x = random.uniform(0, Window.width)
+        self.y = random.uniform(0, Window.height)
+
+        self.bind(pos=self._update_rect, size=self._update_rect)
+
+    def _update_rect(self, *args):
+        self.canvas.clear()
+        with self.canvas:
+            # Рисуем частицу с эффектом свечения
+            Color(*self.color[:3], self.color[3] * self.glow_intensity)
+
+            # Основная частица
+            Ellipse(pos=self.pos, size=self.size)
+
+            # Эффект свечения (больший круг с низкой прозрачностью)
+            if self.glow_intensity > 0.3:
+                glow_size = (self.size[0] * 3, self.size[1] * 3)
+                glow_pos = (self.x - self.size[0], self.y - self.size[1])
+                Color(*self.color[:3], self.color[3] * self.glow_intensity * 0.3)
+                Ellipse(pos=glow_pos, size=glow_size)
+
+    def update(self, dt):
+        """Обновление позиции частицы"""
+        self.x += self.velocity_x * dt
+        self.y += self.velocity_y * dt
+
+        # Плавное изменение скорости для хаотичности
+        if random.random() < 0.05:
+            self.velocity_x += random.uniform(-10, 10)
+            self.velocity_y += random.uniform(-10, 10)
+
+        # Ограничение скорости
+        max_speed = 50
+        self.velocity_x = max(-max_speed, min(max_speed, self.velocity_x))
+        self.velocity_y = max(-max_speed, min(max_speed, self.velocity_y))
+
+        # Зацикливание по краям экрана
+        if self.x < -self.width:
+            self.x = Window.width
+        elif self.x > Window.width:
+            self.x = -self.width
+
+        if self.y < -self.height:
+            self.y = Window.height
+        elif self.y > Window.height:
+            self.y = -self.height
+
+        # Плавное изменение интенсивности свечения
+        if abs(self.glow_intensity - self.target_glow) > 0.01:
+            self.glow_intensity += (self.target_glow - self.glow_intensity) * 0.1
+
+
+class ParticleSystem(Widget):
+    """Система частиц для создания эффекта пыли/искр"""
+    particles = ListProperty([])
+    is_active = BooleanProperty(False)
+    glow_mode = BooleanProperty(False)  # Режим интенсивного свечения
+    base_glow = NumericProperty(0.5)  # Базовая яркость
+    active_glow = NumericProperty(1.2)  # Яркость при активном режиме
+
+    def __init__(self, num_particles=20, **kwargs):
+        super().__init__(**kwargs)
+        self.num_particles = num_particles
+        self.update_clock = None
+        self.bind(pos=self._update_all, size=self._update_all)
+
+        # Создаем частицы
+        self.create_particles()
+
+        # Сразу запускаем анимацию частиц (они всегда движутся)
+        self.start_perpetual_motion()
+
+    def create_particles(self):
+        """Создает частицы"""
+        self.particles = []
+        for _ in range(self.num_particles):
+            particle = DustParticle()
+            self.particles.append(particle)
+            self.add_widget(particle)
+
+    def start_perpetual_motion(self):
+        """Запускает вечное движение частиц"""
+        self.is_active = True
+
+        if not self.update_clock:
+            self.update_clock = Clock.schedule_interval(self.update_particles, 1 / 60)
+
+    def set_glow_mode(self, active=True):
+        """Устанавливает режим свечения (яркий или обычный)"""
+        self.glow_mode = active
+        target_glow = self.active_glow if active else self.base_glow
+
+        for particle in self.particles:
+            particle.target_glow = target_glow
+
+    def update_particles(self, dt):
+        """Обновляет все частицы"""
+        if not self.is_active:
+            return
+
+        for particle in self.particles:
+            particle.update(dt)
+
+        # Периодически меняем интенсивность свечения для эффекта мерцания
+        # только если в активном режиме
+        if self.glow_mode and random.random() < 0.02:
+            for particle in self.particles:
+                # Временное усиление свечения для мерцания
+                particle.glow_intensity = min(particle.target_glow * 1.3, 2.0)
+
+    def _update_all(self, *args):
+        """Обновляет все частицы при изменении размера/позиции"""
+        for particle in self.particles:
+            particle._update_rect()
+
+
+class FullScreenTouchArea(Widget):
+    """Область на весь экран для возврата монеты"""
+    is_enabled = BooleanProperty(False)  # По умолчанию выключена
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.size_hint = (1, 1)  # На весь экран
+        self.pos_hint = {'x': 0, 'y': 0}
+
+    def on_touch_down(self, touch):
+        if self.is_enabled and self.collide_point(*touch.pos):
+            print("👆 Нажатие на весь экран для возврата монеты")
+            return True
+        return super().on_touch_down(touch)
 
 
 class TouchArea(Widget):
     """Область для нажатия с визуальной подсветкой"""
     highlight_color = ColorProperty((0, 1, 0, 0.3))
     is_pressed = BooleanProperty(False)
+    is_enabled = BooleanProperty(True)  # Флаг для блокировки/разблокировки области
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -26,7 +187,8 @@ class TouchArea(Widget):
         self.bind(pos=self._update_rect, size=self._update_rect)
 
     def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
+        # Проверяем, включена ли область и есть ли коллизия
+        if self.is_enabled and self.collide_point(*touch.pos):
             self.is_pressed = True
             self.touch_pos = touch.pos
             self.show_touch_feedback()
@@ -35,7 +197,7 @@ class TouchArea(Widget):
         return super().on_touch_down(touch)
 
     def on_touch_up(self, touch):
-        if self.collide_point(*touch.pos):
+        if self.is_enabled and self.collide_point(*touch.pos):
             self.is_pressed = False
             self.hide_touch_feedback()
             return True
@@ -390,6 +552,163 @@ class SpritesheetCoin(Image):
         Clock.schedule_once(lambda dt: self._update_rotation(), 0.02)
 
 
+class FinalSpritesheetCoin(Image):
+    """Монета для финальной анимации из спрайт-листа 6x6 (36 кадров)"""
+    current_frame = NumericProperty(0)
+    is_animating = BooleanProperty(False)
+    frames = ListProperty([])
+    rotation_angle = NumericProperty(270)  # Поворот на 270 градусов по часовой стрелке (90+180=270)
+
+    # Флаг для отладки
+    debug_mode = BooleanProperty(False)
+
+    def __init__(self, spritesheet_path, frame_width=128, frame_height=128,
+                 cols=6, rows=6, total_frames=36, start_frame=0, debug=False, **kwargs):
+        super().__init__(**kwargs)
+
+        self.frame_width = frame_width
+        self.frame_height = frame_height
+        self.cols = cols
+        self.rows = rows
+        self.total_frames = total_frames
+        self.start_frame = start_frame
+        self.anim_clock = None
+        self.current_fps = 60
+        self.debug_mode = debug
+
+        # Загружаем спрайт-лист
+        self.load_spritesheet(spritesheet_path)
+
+        # Привязываем обновление
+        self.bind(texture=self._update_display)
+        self.bind(pos=self._update_display, size=self._update_display)
+
+    def load_spritesheet(self, spritesheet_path):
+        """Загружает спрайт-лист 6x6 (36 кадров)"""
+        if not os.path.exists(spritesheet_path):
+            print(f"❌ Файл не найден: {spritesheet_path}")
+            return False
+
+        try:
+            img = CoreImage(spritesheet_path)
+            texture = img.texture
+            if not texture:
+                print("❌ Не удалось загрузить текстуру")
+                return False
+
+            tex_width, tex_height = texture.size
+            print(f"📐 Размер финального спрайт-листа {spritesheet_path}: {tex_width}x{tex_height}")
+
+            frame_w = min(self.frame_width, tex_width // self.cols)
+            frame_h = min(self.frame_height, tex_height // self.rows)
+            print(f"🖼️ Размер кадра: {frame_w}x{frame_h} (сетка {self.cols}x{self.rows})")
+
+            frames = []
+            for i in range(self.total_frames):
+                row = i // self.cols
+                col = i % self.cols
+                x = col * frame_w
+                y = (self.rows - 1 - row) * frame_h
+                try:
+                    frame = texture.get_region(x, y, frame_w, frame_h)
+                    frames.append(frame)
+                except Exception as e:
+                    print(f"❌ Ошибка кадра {i}: {e}")
+
+            print(f"✅ Загружено кадров: {len(frames)} из {self.total_frames}")
+
+            self.frames = frames
+
+            if self.frames and 0 <= self.start_frame < len(self.frames):
+                self.texture = self.frames[self.start_frame]
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Ошибка загрузки спрайт-листа: {e}")
+            return False
+
+    def start_animation(self, fps=30, loop=False):
+        """Запускает анимацию финального спрайт-листа (один раз)"""
+        if not self.frames or self.is_animating:
+            return
+
+        self.is_animating = True
+        self.current_fps = fps
+        self.current_frame = 0
+        self.loop = loop
+        self.frame_duration = 1.0 / fps
+
+        if self.anim_clock:
+            self.anim_clock.cancel()
+
+        self.anim_clock = Clock.schedule_interval(self.next_frame, self.frame_duration)
+
+        print(f"🎬 Финальная анимация запущена с FPS: {fps}, кадров: {len(self.frames)}, loop: {loop}")
+
+    def next_frame(self, dt):
+        if not self.is_animating or not self.frames:
+            return
+
+        # Переходим к следующему кадру
+        next_frame = self.current_frame + 1
+
+        # Проверяем, не вышли ли за пределы
+        if next_frame >= len(self.frames):
+            if self.loop:
+                next_frame = 0
+                if self.debug_mode:
+                    print("🔄 Цикл финальной анимации")
+            else:
+                # Останавливаем анимацию на последнем кадре
+                self.stop_animation()
+                return
+
+        self.current_frame = next_frame
+        self.texture = self.frames[self.current_frame]
+
+        if self.debug_mode:
+            print(f"🎞️ Финальный кадр: {self.current_frame + 1}/{len(self.frames)}")
+
+        self._update_display()
+
+    def stop_animation(self):
+        """Останавливает анимацию"""
+        self.is_animating = False
+
+        if self.anim_clock:
+            self.anim_clock.cancel()
+            self.anim_clock = None
+
+        if self.debug_mode:
+            print("⏹️ Финальная анимация остановлена")
+
+    def _update_display(self, *args):
+        """Обновляет отображение с поворотом на 270 градусов"""
+        if not self.texture:
+            return
+
+        if self.width <= 0 or self.height <= 0:
+            return
+
+        self.canvas.clear()
+
+        center_x = self.x + self.width / 2
+        center_y = self.y + self.height / 2
+
+        with self.canvas:
+            # Поворачиваем изображение на 270 градусов по часовой стрелке
+            PushMatrix()
+            Translate(center_x, center_y)
+            Rotate(angle=self.rotation_angle, origin=(0, 0))
+            Translate(-center_x, -center_y)
+
+            Color(1, 1, 1, 1)
+            Rectangle(texture=self.texture, pos=self.pos, size=self.size)
+
+            PopMatrix()
+
+
 class CoinScreen(BaseGameScreen):
     """Игровой экран с монетой из спрайт-листов 12x9 (108 кадров)
        Упрощенная анимация: движение по спирали + вращение в центре + прокрутка всех кадров
@@ -400,19 +719,28 @@ class CoinScreen(BaseGameScreen):
 
         self.background_image = 'assets/backgrounds/coin_bg.png'
 
-        # Два спрайт-листа
+        # Два спрайт-листа для основной анимации (108 кадров)
         self.spritesheet_path_1 = 'assets/sprites/coin_spritesheet_1.png'
         self.spritesheet_path_2 = 'assets/sprites/coin_spritesheet_2.png'
+
+        # Два спрайт-листа для финальной анимации (36 кадров)
+        self.final_spritesheet_orel = 'assets/sprites/orel_spritesheet.png'
+        self.final_spritesheet_reshka = 'assets/sprites/reshka_spritesheet.png'
 
         # Статические изображения для начального состояния
         self.orel_image = 'assets/sprites/orel.png'
         self.reshka_image = 'assets/sprites/reshka.png'
 
         self.coin = None
+        self.final_coin = None  # Для финальной анимации
         self.touch_area = None
+        self.fullscreen_touch_area = None  # Область на весь экран для возврата
         self.info_label = None
         self.stats_label = None
         self.flip_sound = None
+        self.particle_system = None  # Система частиц
+        self.return_animation_active = False  # Флаг для анимации возврата
+        self.is_animating = False  # Флаг, указывающий, идет ли какая-либо анимация
 
         # Текущая сторона монеты (0 - орел, 1 - решка)
         self.current_side = 0
@@ -425,6 +753,7 @@ class CoinScreen(BaseGameScreen):
 
         # Высота монеты для расчета смещения (в пикселях)
         self.coin_height = 55
+        self.final_coin_size = self.coin_height * 4  # Увеличение в 4 раза от начального (220px)
 
         # Начальное смещение тени (как в том файле)
         self.initial_shadow_offset = -self.coin_height * 0.97
@@ -443,21 +772,88 @@ class CoinScreen(BaseGameScreen):
         # Отрицательное значение для смещения влево
         self.final_offset_x_pixels = -self.coin_height * 0.33
 
+        # Стартовая позиция монеты (левая часть экрана)
+        self.start_pos_x = 0.18
+        self.start_pos_y = 0.5
+
+        # Центр эллипса
+        self.center_pos_x = 0.35
+        self.center_pos_y = 0.5
+
         # Флаг отладки
         self.debug_mode = True
 
     def on_enter(self):
+        """При входе на экран восстанавливаем начальное состояние монеты"""
         super().on_enter()
+
+        # Пересоздаем UI при каждом входе
         self.setup_game_ui()
         self.load_flip_sound()
         Window.bind(on_resize=self.on_window_resize)
+
+        # Сбрасываем монету на стартовую позицию с первым кадром
+        if self.coin:
+            # Останавливаем все анимации
+            self.coin.stop_animation()
+
+            # Устанавливаем правильный спрайт-лист в зависимости от текущей стороны
+            if self.current_side == 0:
+                self.coin.load_spritesheet(self.spritesheet_path_1)
+            else:
+                self.coin.load_spritesheet(self.spritesheet_path_2)
+
+            # Устанавливаем первый кадр
+            if self.coin.frames and len(self.coin.frames) > 0:
+                self.coin.texture = self.coin.frames[0]
+
+            # Сбрасываем позицию на стартовую
+            self.coin.pos_hint = {'center_x': self.start_pos_x, 'center_y': self.start_pos_y}
+            self.coin.size = (self.coin_height, self.coin_height)
+            self.coin.opacity = 1
+
+            # Сбрасываем параметры тени на исходные
+            self.coin.shadow_offset_x = 0
+            self.coin.shadow_offset_y = self.initial_shadow_offset + self.coin_height * 0.13
+            self.coin.shadow_scale_y = 1.0
+            self.coin.shadow_alpha = 0.5
+
+            # Сбрасываем параметры эллипса
+            self.coin.ellipse_offset_x = -self.ellipse_radius_x
+            self.coin.ellipse_offset_y = 0
+            self.coin.spiral_factor = 1.0
+            self.coin.extra_offset_x = 0
+
+        # Скрываем финальную монету
+        if self.final_coin:
+            self.final_coin.stop_animation()
+            self.final_coin.opacity = 0
+
+        # Сбрасываем флаги
+        self.is_animating = False
+        self.return_animation_active = False
+
+        # Отключаем полноэкранную область
+        if self.fullscreen_touch_area:
+            self.fullscreen_touch_area.is_enabled = False
+
+        # Включаем основную область нажатия
+        if self.touch_area:
+            self.touch_area.is_enabled = True
+
+        # Частицы уже запущены в __init__, просто устанавливаем обычный режим свечения
+        if self.particle_system:
+            self.particle_system.set_glow_mode(False)
 
     def on_leave(self):
         super().on_leave()
         if self.coin:
             self.coin.stop_animation()
+        if self.final_coin:
+            self.final_coin.stop_animation()
         if self.flip_sound and self.flip_sound.state == 'play':
             self.flip_sound.stop()
+        # НЕ останавливаем частицы, они должны работать всегда
         Window.unbind(on_resize=self.on_window_resize)
 
     def on_window_resize(self, instance, width, height):
@@ -507,6 +903,8 @@ class CoinScreen(BaseGameScreen):
         # Проверяем наличие файлов
         self.check_file(self.spritesheet_path_1)
         self.check_file(self.spritesheet_path_2)
+        self.check_file(self.final_spritesheet_orel)
+        self.check_file(self.final_spritesheet_reshka)
         self.check_file(self.orel_image)
         self.check_file(self.reshka_image)
 
@@ -514,11 +912,15 @@ class CoinScreen(BaseGameScreen):
         center_x = 0.35
         image_shift = 0.02
 
+        # Вычисляем стартовую позицию (левая часть экрана)
+        self.start_pos_x = center_x - a - image_shift  # = 0.18
+
         # Размер монеты
         coin_size = 55
         self.coin_height = coin_size
         self.initial_shadow_offset = -self.coin_height * 0.97
         self.current_shadow_offset = self.initial_shadow_offset
+        self.final_coin_size = self.coin_height * 4  # Увеличение в 4 раза
 
         # Смещение для финального этапа (отрицательное для смещения влево)
         self.final_offset_x_pixels = -self.coin_height * 0.33
@@ -540,7 +942,7 @@ class CoinScreen(BaseGameScreen):
             initial_spritesheet = self.spritesheet_path_2
             print(f"🎲 Начальная сторона: РЕШКА, спрайт-лист: 2, кадр: 1")
 
-        # СОЗДАЕМ МОНЕТУ - убираем дополнительное смещение тени
+        # СОЗДАЕМ МОНЕТУ для основной анимации
         spritesheet_paths = {
             'heads': self.spritesheet_path_1,
             'tails': self.spritesheet_path_2
@@ -557,7 +959,7 @@ class CoinScreen(BaseGameScreen):
             rotation_angle=-90,
             size_hint=(None, None),
             size=(coin_size, coin_size),
-            pos_hint={'center_x': center_x - a - image_shift, 'center_y': 0.5},
+            pos_hint={'center_x': self.start_pos_x, 'center_y': self.start_pos_y},
             allow_stretch=True,
             shadow_offset_x=0,
             shadow_offset_y=self.initial_shadow_offset + self.coin_height * 0.13,
@@ -570,6 +972,11 @@ class CoinScreen(BaseGameScreen):
         # Загружаем начальный спрайт-лист
         self.coin.load_spritesheet(initial_spritesheet)
 
+        # Явно устанавливаем первый кадр
+        if self.coin.frames and len(self.coin.frames) > 0:
+            self.coin.texture = self.coin.frames[0]
+            print(f"   Установлен первый кадр при создании монеты")
+
         # Устанавливаем начальное смещение эллипса (левая точка)
         self.coin.ellipse_offset_x = -self.ellipse_radius_x
         self.coin.ellipse_offset_y = 0
@@ -577,14 +984,50 @@ class CoinScreen(BaseGameScreen):
 
         self.layout.add_widget(self.coin)
 
-        # Область для нажатия
+        # СОЗДАЕМ МОНЕТУ для финальной анимации (изначально скрыта)
+        self.final_coin = FinalSpritesheetCoin(
+            spritesheet_path=self.final_spritesheet_orel,  # Временный путь, будет заменен при показе
+            frame_width=128,
+            frame_height=128,
+            cols=6,
+            rows=6,
+            total_frames=36,
+            start_frame=0,
+            size_hint=(None, None),
+            size=(self.final_coin_size, self.final_coin_size),
+            pos_hint={'center_x': 0.5, 'center_y': 0.5},
+            allow_stretch=True,
+            opacity=0,  # Изначально скрыта
+            debug=self.debug_mode
+        )
+        self.layout.add_widget(self.final_coin)
+
+        # СОЗДАЕМ СИСТЕМУ ЧАСТИЦ (всегда активна)
+        self.particle_system = ParticleSystem(num_particles=30)
+        self.layout.add_widget(self.particle_system)
+
+        # СОЗДАЕМ ОБЛАСТЬ НА ВЕСЬ ЭКРАН для возврата монеты (изначально скрыта)
+        self.fullscreen_touch_area = FullScreenTouchArea()
+        self.fullscreen_touch_area.is_enabled = False
+        self.layout.add_widget(self.fullscreen_touch_area)
+        self.fullscreen_touch_area.bind(on_touch_down=self.on_fullscreen_touch)
+
+        # Область для нажатия (основная)
         self.touch_area = TouchArea(
             size_hint=(0.4, 0.4),
-            pos_hint={'center_x': center_x - a - image_shift, 'center_y': 0.5},
+            pos_hint={'center_x': self.start_pos_x, 'center_y': self.start_pos_y},
         )
         self.layout.add_widget(self.touch_area)
 
         self.touch_area.bind(on_touch_down=self.on_area_touch)
+
+    def on_fullscreen_touch(self, instance, touch):
+        """Обработка нажатия на область всего экрана"""
+        if instance.is_enabled and instance.collide_point(*touch.pos):
+            print("🖱️ Нажатие на весь экран - запуск возврата монеты")
+            self.return_coin_to_start()
+            return True
+        return False
 
     def create_spiral_animation(self, duration=8.0, rotations=3):
         """
@@ -620,17 +1063,49 @@ class CoinScreen(BaseGameScreen):
 
     def on_area_touch(self, instance, touch):
         if instance.collide_point(*touch.pos):
-            self.flip_coin()
-            return True
+            # Если сейчас идет какая-либо анимация, блокируем действие
+            if self.is_animating:
+                print("⏳ Анимация в процессе, подождите...")
+                return True
+
+            # Если финальная монета видна и анимация завершена, запускаем возврат
+            if self.final_coin and self.final_coin.opacity == 1 and not self.final_coin.is_animating:
+                self.return_coin_to_start()
+                return True
+            # Иначе запускаем обычное вращение
+            elif not self.coin.is_animating and not self.final_coin.is_animating:
+                self.flip_coin()
+                return True
         return False
+
+    def set_animating_state(self, animating):
+        """Устанавливает состояние анимации и блокирует/разблокирует touch_area"""
+        self.is_animating = animating
+        if self.touch_area:
+            self.touch_area.is_enabled = not animating
 
     def flip_coin(self):
         if self.coin.is_animating:
             print("⏳ Монета уже вращается...")
             return
 
+        # Блокируем нажатия во время анимации
+        self.set_animating_state(True)
+        # Отключаем полноэкранную область
+        if self.fullscreen_touch_area:
+            self.fullscreen_touch_area.is_enabled = False
+
+        # Скрываем финальную монету если она была видна
+        if self.final_coin:
+            self.final_coin.stop_animation()
+            self.final_coin.opacity = 0
+
         # Воспроизводим звук вращения
         self.play_flip_sound()
+
+        # Включаем режим яркого свечения частиц (они уже движутся, просто становятся ярче)
+        if self.particle_system:
+            self.particle_system.set_glow_mode(True)
 
         # Определяем случайный результат
         result = random.randint(0, 1)
@@ -811,35 +1286,170 @@ class CoinScreen(BaseGameScreen):
                             total_duration + 0.1)
 
     def finish_rotation(self, result):
-        """Этап 4: Показ результата"""
-        print("⏱️ ЭТАП 4: Показ результата")
+        """Этап 4: Показ результата с паузой 2 секунды и запуск финальной анимации"""
+        print("⏱️ ЭТАП 4: Показ результата, пауза 2 секунды и финальная анимация")
 
-        # Полностью останавливаем анимацию
+        # Полностью останавливаем анимацию основной монеты
         if self.coin:
             self.coin.stop_animation()
+            # Оставляем монету видимой на время паузы
+            self.coin.opacity = 1
 
-            # Принудительно очищаем canvas
-            self.coin.canvas.clear()
+        # Запускаем финальную анимацию с задержкой 2 секунды
+        Clock.schedule_once(lambda dt: self.start_final_animation(result), 2.0)
 
-            # Сбрасываем флаг обновления
-            self.coin._updating = False
+    def start_final_animation(self, result):
+        """Запускает финальную анимацию с увеличением и выходом в центр"""
+        print("✨ ЗАПУСК ФИНАЛЬНОЙ АНИМАЦИИ (после паузы 2 секунды)")
 
-        # Устанавливаем результат
-        self._show_result(result)
-
-    def _show_result(self, result):
-        """Внутренний метод для показа результата без артефактов"""
+        # Скрываем основную монету
         if self.coin:
-            # Устанавливаем результат
-            self.coin.set_result(result)
+            self.coin.opacity = 0
+
+        # Выбираем нужный спрайт-лист в зависимости от результата
+        if result == 0:
+            final_spritesheet = self.final_spritesheet_orel
+            print("   Используем спрайт-лист ОРЕЛ (36 кадров)")
+        else:
+            final_spritesheet = self.final_spritesheet_reshka
+            print("   Используем спрайт-лист РЕШКА (36 кадров)")
+
+        # Загружаем спрайт-лист в финальную монету
+        self.final_coin.load_spritesheet(final_spritesheet)
+
+        # Убеждаемся, что final_coin_size правильно вычислен (в 4 раза больше)
+        target_size = self.coin_height * 4  # Увеличение в 4 раза (55px -> 220px)
+
+        print(f"   Начальный размер: {self.coin_height}px")
+        print(f"   Конечный размер: {target_size}px")
+
+        # Устанавливаем начальные параметры - СТАРТ ИЗ ЦЕНТРА ЭЛЛИПСА!
+        self.final_coin.opacity = 1
+        self.final_coin.size = (self.coin_height, self.coin_height)  # Начинаем с размера основной монеты
+        self.final_coin.pos_hint = {'center_x': self.center_pos_x,
+                                    'center_y': self.center_pos_y}  # Старт из центра эллипса (0.35, 0.5)
+
+        # Принудительно обновляем позицию и размер
+        self.final_coin.pos = self.final_coin.pos
+        self.final_coin.size = self.final_coin.size
+
+        # Длительность анимации
+        animation_duration = 1.5  # 1.5 секунды
+
+        # Запускаем анимацию кадров с правильным FPS для синхронизации
+        # 36 кадров за animation_duration секунд = 36 / animation_duration FPS
+        frame_fps = 36 / animation_duration  # 36 / 1.5 = 24 FPS
+        self.final_coin.start_animation(fps=frame_fps, loop=False)
+
+        # Создаем анимацию увеличения и перемещения в центр экрана
+        # Используем линейную интерполяцию для равномерного увеличения
+        grow_anim = Animation(
+            size=(target_size, target_size),  # Увеличение в 4 раза
+            pos_hint={'center_x': 0.5, 'center_y': 0.5},  # Перемещение в центр экрана
+            duration=animation_duration,
+            t='linear'  # Линейная интерполяция для равномерного увеличения
+        )
+
+        def on_grow_complete(animation, coin):
+            print(f"✅ Финальная анимация увеличения завершена. Итоговый размер: {coin.size}")
+            # Возвращаем частицам нормальную яркость
+            if self.particle_system:
+                self.particle_system.set_glow_mode(False)
+            # Разблокируем нажатия после завершения всей анимации
+            self.set_animating_state(False)
+            # Включаем полноэкранную область для возврата монеты
+            if self.fullscreen_touch_area:
+                self.fullscreen_touch_area.is_enabled = True
+                print("👆 Включена полноэкранная область для возврата монеты")
+
+        grow_anim.bind(on_complete=on_grow_complete)
+        grow_anim.start(self.final_coin)
 
         self.stop_flip_sound()
 
         # Обновляем текущую сторону для следующего раза
         self.current_side = result
 
+    def return_coin_to_start(self):
+        """Возвращает монету в исходное положение"""
+        print("🔄 ЗАПУСК АНИМАЦИИ ВОЗВРАТА")
+
+        # Блокируем нажатия во время анимации возврата
+        self.set_animating_state(True)
+        # Отключаем полноэкранную область
+        if self.fullscreen_touch_area:
+            self.fullscreen_touch_area.is_enabled = False
+        self.return_animation_active = True
+
+        # Останавливаем анимацию финальной монеты
+        if self.final_coin:
+            self.final_coin.stop_animation()
+            self.final_coin.opacity = 0  # Скрываем финальную монету
+
+        # Показываем основную монету с правильной стороной
+        if self.coin:
+            self.coin.opacity = 1
+            # Загружаем правильный спрайт-лист в зависимости от результата
+            if self.current_side == 0:
+                self.coin.load_spritesheet(self.spritesheet_path_1)
+                print("   Используем первый кадр из спрайт-листа ОРЕЛ")
+            else:
+                self.coin.load_spritesheet(self.spritesheet_path_2)
+                print("   Используем первый кадр из спрайт-листа РЕШКА")
+
+            # Устанавливаем ПЕРВЫЙ КАДР (индекс 0) для показа результата
+            if self.coin.frames and len(self.coin.frames) > 0:
+                self.coin.texture = self.coin.frames[0]
+                print(f"   Установлен первый кадр (индекс 0)")
+
+            # Сбрасываем параметры тени на исходные значения
+            self.coin.shadow_offset_x = 0
+            self.coin.shadow_offset_y = self.initial_shadow_offset + self.coin_height * 0.13
+            self.coin.shadow_scale_y = 1.0
+            self.coin.shadow_alpha = 0.5
+
+            # Устанавливаем начальную позицию для анимации возврата - ИЗ ЦЕНТРА ЭКРАНА
+            self.coin.pos_hint = {'center_x': 0.5, 'center_y': 0.5}
+            self.coin.size = (self.final_coin_size, self.final_coin_size)  # Начинаем с большого размера
+
+        # Создаем анимацию уменьшения и возврата на стартовую позицию
+        return_anim = Animation(
+            size=(self.coin_height, self.coin_height),  # Уменьшаем до исходного размера
+            pos_hint={'center_x': self.start_pos_x, 'center_y': self.start_pos_y},
+            # Возвращаем на стартовую позицию (0.18, 0.5)
+            duration=1.2,
+            t='out_quad'  # Плавная анимация
+        )
+
+        def on_return_complete(animation, coin):
+            print("✅ Анимация возврата завершена")
+            self.return_animation_active = False
+            # Разблокируем нажатия
+            self.set_animating_state(False)
+
+        return_anim.bind(on_complete=on_return_complete)
+        return_anim.start(self.coin)
+
     def go_to_menu(self):
+        """Возврат в меню с полной остановкой всех анимаций"""
+        print("🔙 Возврат в меню")
+
+        # Останавливаем все анимации
         if self.coin:
             self.coin.stop_animation()
+        if self.final_coin:
+            self.final_coin.stop_animation()
+
+        # Останавливаем звук
         self.stop_flip_sound()
+
+        # Сбрасываем флаги анимации
+        self.is_animating = False
+        self.return_animation_active = False
+
+        # Отключаем полноэкранную область
+        if self.fullscreen_touch_area:
+            self.fullscreen_touch_area.is_enabled = False
+
+        # Вызываем метод родительского класса для перехода в меню
         super().go_to_menu()
