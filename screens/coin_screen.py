@@ -906,7 +906,7 @@ class CoinScreen(BaseGameScreen):
 
     def load_flip_sound(self):
         """Загружает звук для вращения монеты"""
-        sound_path = 'assets/sounds/coin/coin_10s.ogg'
+        sound_path = 'assets/sounds/coin/coin_13s.ogg'
 
         if os.path.exists(sound_path):
             self.flip_sound = SoundLoader.load(sound_path)
