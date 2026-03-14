@@ -158,6 +158,15 @@ class ParticleSystem(Widget):
         for particle in self.particles:
             particle._update_rect()
 
+    def cleanup(self):
+        """Очищает все частицы и останавливает анимацию"""
+        self.is_active = False
+        if self.update_clock:
+            self.update_clock.cancel()
+            self.update_clock = None
+        self.particles = []
+        self.clear_widgets()
+
 
 class FullScreenTouchArea(Widget):
     """Область на весь экран для возврата монеты"""
@@ -170,7 +179,6 @@ class FullScreenTouchArea(Widget):
 
     def on_touch_down(self, touch):
         if self.is_enabled and self.collide_point(*touch.pos):
-            print("👆 Нажатие на весь экран для возврата монеты")
             return True
         return super().on_touch_down(touch)
 
@@ -192,7 +200,6 @@ class TouchArea(Widget):
             self.is_pressed = True
             self.touch_pos = touch.pos
             self.show_touch_feedback()
-            print(f"🟢 Нажатие в области: {touch.pos}")
             return True
         return super().on_touch_down(touch)
 
@@ -293,8 +300,6 @@ class SpritesheetCoin(Image):
         self.shadow_scale_y = shadow_scale_y
         self.shadow_alpha = shadow_alpha
 
-        print(f"🔧 SpritesheetCoin __init__: загрузка спрайт-листов")
-
         # Привязываем все свойства, влияющие на отрисовку
         self.bind(texture=self._update_rotation)
         self.bind(pos=self._update_rotation, size=self._update_rotation)
@@ -314,22 +319,18 @@ class SpritesheetCoin(Image):
     def load_spritesheet(self, spritesheet_path):
         """Загружает спрайт-лист 12x9 (108 кадров)"""
         if not os.path.exists(spritesheet_path):
-            print(f"❌ Файл не найден: {spritesheet_path}")
             return False
 
         try:
             img = CoreImage(spritesheet_path)
             texture = img.texture
             if not texture:
-                print("❌ Не удалось загрузить текстуру")
                 return False
 
             tex_width, tex_height = texture.size
-            print(f"📐 Размер спрайт-листа {spritesheet_path}: {tex_width}x{tex_height}")
 
             frame_w = min(self.frame_width, tex_width // self.cols)
             frame_h = min(self.frame_height, tex_height // self.rows)
-            print(f"🖼️ Размер кадра: {frame_w}x{frame_h} (сетка {self.cols}x{self.rows})")
 
             frames = []
             for i in range(self.total_frames):
@@ -341,9 +342,7 @@ class SpritesheetCoin(Image):
                     frame = texture.get_region(x, y, frame_w, frame_h)
                     frames.append(frame)
                 except Exception as e:
-                    print(f"❌ Ошибка кадра {i}: {e}")
-
-            print(f"✅ Загружено кадров: {len(frames)} из {self.total_frames}")
+                    pass
 
             self.frames = frames
             self.current_spritesheet = spritesheet_path
@@ -354,7 +353,6 @@ class SpritesheetCoin(Image):
             return True
 
         except Exception as e:
-            print(f"❌ Ошибка загрузки спрайт-листа: {e}")
             return False
 
     def set_animation_range(self, start_frame, end_frame):
@@ -371,7 +369,6 @@ class SpritesheetCoin(Image):
             start_frame, end_frame = end_frame, start_frame
 
         self.animation_range = [start_frame, end_frame]
-        print(f"🎯 Установлен диапазон анимации: {start_frame}-{end_frame} (всего {end_frame - start_frame + 1} кадров)")
 
     def _update_rotation(self, *args):
         """Обновляет поворот изображения и тени"""
@@ -456,10 +453,6 @@ class SpritesheetCoin(Image):
 
         self.anim_clock = Clock.schedule_interval(self.next_frame, self.frame_duration)
 
-        effective_speed = fps * self.frame_step
-        print(
-            f"🎬 Анимация запущена с FPS: {fps}, шаг пропуска: {self.frame_step}, эффективная скорость: {effective_speed} кадров/сек, диапазон: {self.animation_range[0]}-{self.animation_range[1]}")
-
     def next_frame(self, dt):
         if not self.is_animating or not self.frames:
             return
@@ -472,26 +465,17 @@ class SpritesheetCoin(Image):
             # Циклически возвращаемся к началу диапазона
             range_size = self.animation_range[1] - self.animation_range[0] + 1
             next_frame = self.animation_range[0] + ((next_frame - self.animation_range[0]) % range_size)
-            if self.debug_mode:
-                print(f"🔄 Цикл анимации: возврат к началу диапазона, новый кадр: {next_frame + 1}")
 
         # Проверяем, не вышли ли мы за нижнюю границу (при отрицательном шаге)
         elif next_frame < self.animation_range[0]:
             range_size = self.animation_range[1] - self.animation_range[0] + 1
             next_frame = self.animation_range[1] - ((self.animation_range[1] - next_frame) % range_size)
-            if self.debug_mode:
-                print(f"🔄 Цикл анимации: возврат к концу диапазона, новый кадр: {next_frame + 1}")
 
         # Убеждаемся, что кадр в допустимом диапазоне
         next_frame = max(self.animation_range[0], min(next_frame, self.animation_range[1]))
 
         self.current_frame = next_frame
         self.texture = self.frames[self.current_frame]
-
-        # Выводим номер текущего кадра для отладки
-        if self.debug_mode:
-            print(
-                f"🎞️ Кадр: {self.current_frame + 1}/{len(self.frames)} (диапазон: {self.animation_range[0] + 1}-{self.animation_range[1] + 1})")
 
         self._update_rotation()
 
@@ -502,9 +486,6 @@ class SpritesheetCoin(Image):
         if self.anim_clock:
             self.anim_clock.cancel()
             self.anim_clock = None
-
-        if self.debug_mode:
-            print("⏹️ Анимация остановлена")
 
     def set_result(self, result):
         """Устанавливает финальный кадр - ВСЕГДА последний кадр (108-й) независимо от результата"""
@@ -517,9 +498,6 @@ class SpritesheetCoin(Image):
         # Всегда показываем последний кадр (индекс 107 - это 108-й кадр)
         frame_index = 107  # 108-й кадр
 
-        print(
-            f"🎲 Результат: {'ОРЕЛ' if result == 0 else 'РЕШКА'}, финальный кадр: {frame_index + 1} (всегда последний)")
-
         # Устанавливаем текстуру
         self.texture = self.frames[frame_index]
 
@@ -531,8 +509,6 @@ class SpritesheetCoin(Image):
         """Принудительная перерисовка с полной очисткой"""
         self._updating = False
         self._update_rotation()
-        if self.debug_mode:
-            print("🔄 Принудительная перерисовка")
 
     def reset_to_first_animation(self, start_frame=0):
         """Сбрасывает монету к первым 12 кадрам"""
@@ -546,10 +522,16 @@ class SpritesheetCoin(Image):
         self.coin_opacity = 1.0
         if 0 <= start_frame < len(self.frames):
             self.texture = self.frames[start_frame]
-            print(f"🎬 Сброс к первым 12 кадрам, кадр: {start_frame + 1}")
 
         # Обновляем отображение с задержкой
         Clock.schedule_once(lambda dt: self._update_rotation(), 0.02)
+
+    def cleanup(self):
+        """Полная очистка монеты"""
+        self.stop_animation()
+        self.frames = []
+        self.texture = None
+        self.canvas.clear()
 
 
 class FinalSpritesheetCoin(Image):
@@ -586,22 +568,18 @@ class FinalSpritesheetCoin(Image):
     def load_spritesheet(self, spritesheet_path):
         """Загружает спрайт-лист 6x6 (36 кадров)"""
         if not os.path.exists(spritesheet_path):
-            print(f"❌ Файл не найден: {spritesheet_path}")
             return False
 
         try:
             img = CoreImage(spritesheet_path)
             texture = img.texture
             if not texture:
-                print("❌ Не удалось загрузить текстуру")
                 return False
 
             tex_width, tex_height = texture.size
-            print(f"📐 Размер финального спрайт-листа {spritesheet_path}: {tex_width}x{tex_height}")
 
             frame_w = min(self.frame_width, tex_width // self.cols)
             frame_h = min(self.frame_height, tex_height // self.rows)
-            print(f"🖼️ Размер кадра: {frame_w}x{frame_h} (сетка {self.cols}x{self.rows})")
 
             frames = []
             for i in range(self.total_frames):
@@ -613,9 +591,7 @@ class FinalSpritesheetCoin(Image):
                     frame = texture.get_region(x, y, frame_w, frame_h)
                     frames.append(frame)
                 except Exception as e:
-                    print(f"❌ Ошибка кадра {i}: {e}")
-
-            print(f"✅ Загружено кадров: {len(frames)} из {self.total_frames}")
+                    pass
 
             self.frames = frames
 
@@ -625,7 +601,6 @@ class FinalSpritesheetCoin(Image):
             return True
 
         except Exception as e:
-            print(f"❌ Ошибка загрузки спрайт-листа: {e}")
             return False
 
     def start_animation(self, fps=30, loop=False):
@@ -644,8 +619,6 @@ class FinalSpritesheetCoin(Image):
 
         self.anim_clock = Clock.schedule_interval(self.next_frame, self.frame_duration)
 
-        print(f"🎬 Финальная анимация запущена с FPS: {fps}, кадров: {len(self.frames)}, loop: {loop}")
-
     def next_frame(self, dt):
         if not self.is_animating or not self.frames:
             return
@@ -657,8 +630,6 @@ class FinalSpritesheetCoin(Image):
         if next_frame >= len(self.frames):
             if self.loop:
                 next_frame = 0
-                if self.debug_mode:
-                    print("🔄 Цикл финальной анимации")
             else:
                 # Останавливаем анимацию на последнем кадре
                 self.stop_animation()
@@ -666,9 +637,6 @@ class FinalSpritesheetCoin(Image):
 
         self.current_frame = next_frame
         self.texture = self.frames[self.current_frame]
-
-        if self.debug_mode:
-            print(f"🎞️ Финальный кадр: {self.current_frame + 1}/{len(self.frames)}")
 
         self._update_display()
 
@@ -679,9 +647,6 @@ class FinalSpritesheetCoin(Image):
         if self.anim_clock:
             self.anim_clock.cancel()
             self.anim_clock = None
-
-        if self.debug_mode:
-            print("⏹️ Финальная анимация остановлена")
 
     def _update_display(self, *args):
         """Обновляет отображение с поворотом на 270 градусов"""
@@ -707,6 +672,13 @@ class FinalSpritesheetCoin(Image):
             Rectangle(texture=self.texture, pos=self.pos, size=self.size)
 
             PopMatrix()
+
+    def cleanup(self):
+        """Полная очистка финальной монеты"""
+        self.stop_animation()
+        self.frames = []
+        self.texture = None
+        self.canvas.clear()
 
 
 class CoinScreen(BaseGameScreen):
@@ -787,6 +759,9 @@ class CoinScreen(BaseGameScreen):
         """При входе на экран восстанавливаем начальное состояние монеты"""
         super().on_enter()
 
+        # ПРИНУДИТЕЛЬНО ОТМЕНЯЕМ ВСЕ АНИМАЦИИ
+        # Вместо Clock.unschedule() используем отмену конкретных анимаций
+
         # Пересоздаем UI при каждом входе
         self.setup_game_ui()
         self.load_flip_sound()
@@ -796,6 +771,9 @@ class CoinScreen(BaseGameScreen):
         if self.coin:
             # Останавливаем все анимации
             self.coin.stop_animation()
+
+            # Останавливаем все анимации Kivy, связанные с монетой
+            Animation.cancel_all(self.coin)
 
             # Устанавливаем правильный спрайт-лист в зависимости от текущей стороны
             if self.current_side == 0:
@@ -824,9 +802,14 @@ class CoinScreen(BaseGameScreen):
             self.coin.spiral_factor = 1.0
             self.coin.extra_offset_x = 0
 
+            # Принудительно обновляем позицию
+            self.coin._update_position()
+            self.coin._update_rotation()
+
         # Скрываем финальную монету
         if self.final_coin:
             self.final_coin.stop_animation()
+            Animation.cancel_all(self.final_coin)
             self.final_coin.opacity = 0
 
         # Сбрасываем флаги
@@ -846,15 +829,70 @@ class CoinScreen(BaseGameScreen):
             self.particle_system.set_glow_mode(False)
 
     def on_leave(self):
+        """При выходе с экрана полностью очищаем все анимации и виджеты"""
         super().on_leave()
-        if self.coin:
-            self.coin.stop_animation()
-        if self.final_coin:
-            self.final_coin.stop_animation()
-        if self.flip_sound and self.flip_sound.state == 'play':
-            self.flip_sound.stop()
-        # НЕ останавливаем частицы, они должны работать всегда
+
+        # Полная очистка всех виджетов и анимаций
+        self.cleanup_all()
+
         Window.unbind(on_resize=self.on_window_resize)
+
+    def cleanup_all(self):
+        """Полная очистка всех ресурсов экрана"""
+        # Останавливаем все анимации Kivy для всех виджетов
+        if self.coin:
+            Animation.cancel_all(self.coin)
+        if self.final_coin:
+            Animation.cancel_all(self.final_coin)
+        if self.particle_system:
+            Animation.cancel_all(self.particle_system)
+
+        # Отменяем все запланированные события Clock
+        # Вместо Clock.unschedule() без аргументов, отменяем конкретные функции
+        # Но так как мы не храним ссылки на все lambda функции, просто пропускаем это
+        # Анимации будут остановлены через Animation.cancel_all()
+
+        # Останавливаем звук
+        self.stop_flip_sound()
+        if self.flip_sound:
+            self.flip_sound.unload()
+            self.flip_sound = None
+
+        # Очищаем монету
+        if self.coin:
+            self.coin.cleanup()
+            if self.coin in self.layout.children:
+                self.layout.remove_widget(self.coin)
+            self.coin = None
+
+        # Очищаем финальную монету
+        if self.final_coin:
+            self.final_coin.cleanup()
+            if self.final_coin in self.layout.children:
+                self.layout.remove_widget(self.final_coin)
+            self.final_coin = None
+
+        # Очищаем систему частиц
+        if self.particle_system:
+            self.particle_system.cleanup()
+            if self.particle_system in self.layout.children:
+                self.layout.remove_widget(self.particle_system)
+            self.particle_system = None
+
+        # Очищаем области касания
+        if self.touch_area:
+            if self.touch_area in self.layout.children:
+                self.layout.remove_widget(self.touch_area)
+            self.touch_area = None
+
+        if self.fullscreen_touch_area:
+            if self.fullscreen_touch_area in self.layout.children:
+                self.layout.remove_widget(self.fullscreen_touch_area)
+            self.fullscreen_touch_area = None
+
+        # Сбрасываем флаги
+        self.is_animating = False
+        self.return_animation_active = False
 
     def on_window_resize(self, instance, width, height):
         if self.coin:
@@ -862,10 +900,8 @@ class CoinScreen(BaseGameScreen):
 
     def check_file(self, path):
         if os.path.exists(path):
-            print(f"✅ Файл найден: {path}")
             return True
         else:
-            print(f"❌ Файл НЕ найден: {path}")
             return False
 
     def load_flip_sound(self):
@@ -876,11 +912,8 @@ class CoinScreen(BaseGameScreen):
             self.flip_sound = SoundLoader.load(sound_path)
             if self.flip_sound:
                 self.flip_sound.volume = 0.7
-                print(f"✅ Loaded flip sound: {sound_path}")
-            else:
-                print(f"⚠️ Failed to load flip sound: {sound_path}")
         else:
-            print(f"⚠️ Flip sound file not found: {sound_path}")
+            pass
 
     def play_flip_sound(self):
         """Воспроизводит звук вращения монеты"""
@@ -889,15 +922,13 @@ class CoinScreen(BaseGameScreen):
                 if self.flip_sound.state == 'play':
                     self.flip_sound.stop()
                 self.flip_sound.play()
-                print("🔊 Playing flip sound")
             except Exception as e:
-                print(f"⚠️ Error playing flip sound: {e}")
+                pass
 
     def stop_flip_sound(self):
         """Останавливает звук вращения монеты"""
         if self.flip_sound and self.flip_sound.state == 'play':
             self.flip_sound.stop()
-            print("🔇 Flip sound stopped")
 
     def setup_game_ui(self):
         # Проверяем наличие файлов
@@ -934,13 +965,17 @@ class CoinScreen(BaseGameScreen):
             self.coin_start_side = 0
             self.coin_start_frame = 0
             initial_spritesheet = self.spritesheet_path_1
-            print(f"🎲 Начальная сторона: ОРЕЛ, спрайт-лист: 1, кадр: 1")
         else:
             # Решка - используем второй спрайт-лист, кадр 0
             self.coin_start_side = 1
             self.coin_start_frame = 0
             initial_spritesheet = self.spritesheet_path_2
-            print(f"🎲 Начальная сторона: РЕШКА, спрайт-лист: 2, кадр: 1")
+
+        # Перемещаем существующую кнопку меню в левый верхний угол
+        if hasattr(self, 'menu_button') and self.menu_button:
+            self.menu_button.pos_hint = {'x': 0.02, 'top': 0.98}
+            self.menu_button.size_hint = (None, None)
+            self.menu_button.size = (100, 50)
 
         # СОЗДАЕМ МОНЕТУ для основной анимации
         spritesheet_paths = {
@@ -975,7 +1010,6 @@ class CoinScreen(BaseGameScreen):
         # Явно устанавливаем первый кадр
         if self.coin.frames and len(self.coin.frames) > 0:
             self.coin.texture = self.coin.frames[0]
-            print(f"   Установлен первый кадр при создании монеты")
 
         # Устанавливаем начальное смещение эллипса (левая точка)
         self.coin.ellipse_offset_x = -self.ellipse_radius_x
@@ -1024,7 +1058,6 @@ class CoinScreen(BaseGameScreen):
     def on_fullscreen_touch(self, instance, touch):
         """Обработка нажатия на область всего экрана"""
         if instance.is_enabled and instance.collide_point(*touch.pos):
-            print("🖱️ Нажатие на весь экран - запуск возврата монеты")
             self.return_coin_to_start()
             return True
         return False
@@ -1065,7 +1098,6 @@ class CoinScreen(BaseGameScreen):
         if instance.collide_point(*touch.pos):
             # Если сейчас идет какая-либо анимация, блокируем действие
             if self.is_animating:
-                print("⏳ Анимация в процессе, подождите...")
                 return True
 
             # Если финальная монета видна и анимация завершена, запускаем возврат
@@ -1086,7 +1118,6 @@ class CoinScreen(BaseGameScreen):
 
     def flip_coin(self):
         if self.coin.is_animating:
-            print("⏳ Монета уже вращается...")
             return
 
         # Блокируем нажатия во время анимации
@@ -1114,17 +1145,13 @@ class CoinScreen(BaseGameScreen):
         if result == 0:
             # Орел - используем первый спрайт-лист
             spritesheet_to_use = self.spritesheet_path_1
-            result_text = 'ОРЕЛ'
             self.heads_count += 1
         else:
             # Решка - используем второй спрайт-лист
             spritesheet_to_use = self.spritesheet_path_2
-            result_text = 'РЕШКА'
             self.tails_count += 1
 
         self.total_flips += 1
-
-        print(f"\n🎲 Результат: {result_text}, используем спрайт-лист: {spritesheet_to_use}")
 
         # Загружаем нужный спрайт-лист
         self.coin.load_spritesheet(spritesheet_to_use)
@@ -1151,18 +1178,7 @@ class CoinScreen(BaseGameScreen):
         center_rotation_duration = 2.0  # Вращение в центре (первые 12 кадров)
         rotations = 3  # Количество оборотов во время движения
 
-        print(f"\n=== УПРОЩЕННАЯ АНИМАЦИЯ (спрайт-лист 12x9) ===")
-        print(f"1. Движение по спирали к центру: {spiral_duration} сек")
-        print(f"   Анимация: первые 12 кадров (0-11)")
-        print(f"2. Вращение в центре: {center_rotation_duration} сек")
-        print(f"   Анимация: первые 12 кадров (0-11)")
-        print(f"3. Финальная прокрутка всех кадров со смещением (12-107)")
-        print(f"   Всего кадров: 96 (12-107)")
-        print(f"   Смещение влево: {abs(self.final_offset_x_pixels)} пикселей")
-        print(f"   Начальное смещение тени: {self.current_shadow_offset:.2f}px")
-
         # ЭТАП 1: Движение по спирали с анимацией первых 12 кадров
-        print("🎬 ЭТАП 1: Движение по спирали (первые 12 кадров)")
         self.coin.set_animation_range(0, 11)
         self.coin.start_animation(
             fps=base_fps,
@@ -1173,9 +1189,10 @@ class CoinScreen(BaseGameScreen):
         spiral_anim = self.create_spiral_animation(spiral_duration, rotations)
 
         def on_spiral_complete(animation, coin):
-            print("✅ Спираль завершена, начинаем вращение в центре")
-            self.start_center_rotation(result, base_fps, base_frame_step,
-                                       center_rotation_duration)
+            # Проверяем, что монета все еще существует и экран активен
+            if self.coin is not None and not self.return_animation_active:
+                self.start_center_rotation(result, base_fps, base_frame_step,
+                                           center_rotation_duration)
 
         spiral_anim.bind(on_complete=on_spiral_complete)
         spiral_anim.start(self.coin)
@@ -1184,8 +1201,9 @@ class CoinScreen(BaseGameScreen):
         """
         Этап 2: Вращение в центре (первые 12 кадров)
         """
-        print(f"⏱️ ЭТАП 2: Вращение в центре - {duration} сек (первые 12 кадров)")
-        print(f"   Текущее смещение тени: {self.current_shadow_offset:.2f}px")
+        # Проверяем, что монета все еще существует
+        if self.coin is None:
+            return
 
         # Убеждаемся, что монета в центре
         self.coin.spiral_factor = 0
@@ -1198,13 +1216,17 @@ class CoinScreen(BaseGameScreen):
         )
 
         # Через указанное время переходим к финальной прокрутке всех кадров со смещением
-        Clock.schedule_once(lambda dt: self.start_final_rotation_with_offset(result, fps, frame_step), duration)
+        Clock.schedule_once(lambda dt: self.start_final_rotation_with_offset(result, fps, frame_step)
+        if self.coin is not None and not self.return_animation_active else None,
+                            duration)
 
     def start_final_rotation_with_offset(self, result, fps, frame_step):
         """
         Этап 3: Финальная прокрутка всех кадров (12-107) с одновременным смещением влево
         """
-        print("⏱️ ЭТАП 3: Финальная прокрутка всех кадров со смещением влево (12-107)")
+        # Проверяем, что монета все еще существует
+        if self.coin is None:
+            return
 
         self.coin.stop_animation()
 
@@ -1215,11 +1237,6 @@ class CoinScreen(BaseGameScreen):
         frames_to_play = 96  # 107 - 12 + 1 = 96 кадров
         frame_duration = 1.0 / fps
         total_duration = frames_to_play * frame_duration
-
-        print(f"   Кадров для прокрутки: {frames_to_play}")
-        print(f"   Время прокрутки: {total_duration:.2f} сек")
-        print(f"   Смещение влево: {abs(self.final_offset_x_pixels)} пикселей")
-        print(f"   Начальное смещение тени: {self.current_shadow_offset:.2f}px")
 
         # Устанавливаем начальный кадр
         self.coin.current_frame = 12
@@ -1246,7 +1263,7 @@ class CoinScreen(BaseGameScreen):
         self.coin.is_animating = True
 
         def update_frame(dt):
-            if not self.coin.is_animating:
+            if not self.coin.is_animating or self.coin is None:
                 return False
 
             # Переходим к следующему кадру
@@ -1254,7 +1271,6 @@ class CoinScreen(BaseGameScreen):
 
             # Проверяем, не дошли ли до конца
             if next_frame > 107:  # Последний кадр для прокрутки
-                print(f"✅ Достигнут 108 кадр, останавливаем анимацию")
                 self.coin.is_animating = False
                 self.finish_rotation(result)
                 return False
@@ -1264,9 +1280,6 @@ class CoinScreen(BaseGameScreen):
             self.coin.texture = self.coin.frames[next_frame]
             self.coin._update_rotation()
 
-            if self.debug_mode:
-                print(f"🎞️ Кадр: {next_frame + 1}/108, тень: {self.coin.shadow_offset_y:.2f}px")
-
             return True  # Продолжаем анимацию
 
         # Запускаем периодическое обновление кадров
@@ -1274,7 +1287,7 @@ class CoinScreen(BaseGameScreen):
         Clock.schedule_interval(update_frame, frame_interval)
 
         def on_anim_complete(animation, coin):
-            print("✅ Анимации смещения и тени завершены")
+            pass
 
         # Запускаем анимации
         offset_anim.bind(on_complete=on_anim_complete)
@@ -1282,12 +1295,15 @@ class CoinScreen(BaseGameScreen):
         shadow_anim.start(self.coin)
 
         # Страховка - если кадры почему-то не закончились вовремя
-        Clock.schedule_once(lambda dt: self.finish_rotation(result) if self.coin.is_animating else None,
+        Clock.schedule_once(lambda dt: self.finish_rotation(result)
+        if self.coin is not None and self.coin.is_animating else None,
                             total_duration + 0.1)
 
     def finish_rotation(self, result):
         """Этап 4: Показ результата с паузой 2 секунды и запуск финальной анимации"""
-        print("⏱️ ЭТАП 4: Показ результата, пауза 2 секунды и финальная анимация")
+        # Проверяем, что монета все еще существует
+        if self.coin is None:
+            return
 
         # Полностью останавливаем анимацию основной монеты
         if self.coin:
@@ -1296,11 +1312,15 @@ class CoinScreen(BaseGameScreen):
             self.coin.opacity = 1
 
         # Запускаем финальную анимацию с задержкой 2 секунды
-        Clock.schedule_once(lambda dt: self.start_final_animation(result), 2.0)
+        Clock.schedule_once(lambda dt: self.start_final_animation(result)
+        if self.coin is not None and not self.return_animation_active else None,
+                            2.0)
 
     def start_final_animation(self, result):
         """Запускает финальную анимацию с увеличением и выходом в центр"""
-        print("✨ ЗАПУСК ФИНАЛЬНОЙ АНИМАЦИИ (после паузы 2 секунды)")
+        # Проверяем, что финальная монета все еще существует
+        if self.final_coin is None:
+            return
 
         # Скрываем основную монету
         if self.coin:
@@ -1309,19 +1329,14 @@ class CoinScreen(BaseGameScreen):
         # Выбираем нужный спрайт-лист в зависимости от результата
         if result == 0:
             final_spritesheet = self.final_spritesheet_orel
-            print("   Используем спрайт-лист ОРЕЛ (36 кадров)")
         else:
             final_spritesheet = self.final_spritesheet_reshka
-            print("   Используем спрайт-лист РЕШКА (36 кадров)")
 
         # Загружаем спрайт-лист в финальную монету
         self.final_coin.load_spritesheet(final_spritesheet)
 
         # Убеждаемся, что final_coin_size правильно вычислен (в 4 раза больше)
         target_size = self.coin_height * 4  # Увеличение в 4 раза (55px -> 220px)
-
-        print(f"   Начальный размер: {self.coin_height}px")
-        print(f"   Конечный размер: {target_size}px")
 
         # Устанавливаем начальные параметры - СТАРТ ИЗ ЦЕНТРА ЭЛЛИПСА!
         self.final_coin.opacity = 1
@@ -1351,8 +1366,7 @@ class CoinScreen(BaseGameScreen):
         )
 
         def on_grow_complete(animation, coin):
-            print(f"✅ Финальная анимация увеличения завершена. Итоговый размер: {coin.size}")
-            # Возвращаем частицам нормальную яркость
+            # Проверяем, что объекты все еще существуют
             if self.particle_system:
                 self.particle_system.set_glow_mode(False)
             # Разблокируем нажатия после завершения всей анимации
@@ -1360,7 +1374,6 @@ class CoinScreen(BaseGameScreen):
             # Включаем полноэкранную область для возврата монеты
             if self.fullscreen_touch_area:
                 self.fullscreen_touch_area.is_enabled = True
-                print("👆 Включена полноэкранная область для возврата монеты")
 
         grow_anim.bind(on_complete=on_grow_complete)
         grow_anim.start(self.final_coin)
@@ -1372,8 +1385,6 @@ class CoinScreen(BaseGameScreen):
 
     def return_coin_to_start(self):
         """Возвращает монету в исходное положение"""
-        print("🔄 ЗАПУСК АНИМАЦИИ ВОЗВРАТА")
-
         # Блокируем нажатия во время анимации возврата
         self.set_animating_state(True)
         # Отключаем полноэкранную область
@@ -1392,15 +1403,12 @@ class CoinScreen(BaseGameScreen):
             # Загружаем правильный спрайт-лист в зависимости от результата
             if self.current_side == 0:
                 self.coin.load_spritesheet(self.spritesheet_path_1)
-                print("   Используем первый кадр из спрайт-листа ОРЕЛ")
             else:
                 self.coin.load_spritesheet(self.spritesheet_path_2)
-                print("   Используем первый кадр из спрайт-листа РЕШКА")
 
             # Устанавливаем ПЕРВЫЙ КАДР (индекс 0) для показа результата
             if self.coin.frames and len(self.coin.frames) > 0:
                 self.coin.texture = self.coin.frames[0]
-                print(f"   Установлен первый кадр (индекс 0)")
 
             # Сбрасываем параметры тени на исходные значения
             self.coin.shadow_offset_x = 0
@@ -1422,7 +1430,6 @@ class CoinScreen(BaseGameScreen):
         )
 
         def on_return_complete(animation, coin):
-            print("✅ Анимация возврата завершена")
             self.return_animation_active = False
             # Разблокируем нажатия
             self.set_animating_state(False)
@@ -1432,24 +1439,8 @@ class CoinScreen(BaseGameScreen):
 
     def go_to_menu(self):
         """Возврат в меню с полной остановкой всех анимаций"""
-        print("🔙 Возврат в меню")
-
-        # Останавливаем все анимации
-        if self.coin:
-            self.coin.stop_animation()
-        if self.final_coin:
-            self.final_coin.stop_animation()
-
-        # Останавливаем звук
-        self.stop_flip_sound()
-
-        # Сбрасываем флаги анимации
-        self.is_animating = False
-        self.return_animation_active = False
-
-        # Отключаем полноэкранную область
-        if self.fullscreen_touch_area:
-            self.fullscreen_touch_area.is_enabled = False
+        # Полная очистка всех ресурсов
+        self.cleanup_all()
 
         # Вызываем метод родительского класса для перехода в меню
         super().go_to_menu()
