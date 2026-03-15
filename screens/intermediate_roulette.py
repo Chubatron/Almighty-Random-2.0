@@ -121,7 +121,7 @@ class IntermediateRoulette(IntermediateScreen):  # Наследуемся от I
             pass
 
         back_btn = BackImageButton(
-            source='assets/images/buttons/Orange_back_to_menu_button.png',
+            source='assets/images/buttons/bronze_button.png',
             size_hint=(None, None),
             size=(60, 60),  # Увеличиваем размер
             pos_hint={'x': 0.05, 'y': 0.02},

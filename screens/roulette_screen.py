@@ -15,6 +15,7 @@ from kivy.properties import NumericProperty
 from kivy.graphics import Rotate, PushMatrix, PopMatrix
 from kivy.clock import Clock
 
+
 class RotatingImage(Image):
     """Image с поддержкой вращения вокруг центра"""
     angle = NumericProperty(0)
@@ -54,6 +55,7 @@ class RotatingImage(Image):
             center_y = self.y + self.height / 2
             self._rotate.origin = (center_x, center_y)
             print(f"Center updated: ({center_x}, {center_y})")
+
 
 class ToggleButtonWithLabel(ButtonBehavior, FloatLayout):
     """Кнопка с изображением как фоном и текстом по центру"""
@@ -97,6 +99,7 @@ class ToggleButtonWithLabel(ButtonBehavior, FloatLayout):
     @icon.setter
     def icon(self, value):
         self.bg_image.source = value
+
 
 class ImageButton(ButtonBehavior, Image):
     pass
@@ -323,7 +326,14 @@ class RouletteScreen(BaseGameScreen):
     def toggle_roulette_type(self, instance=None):
         """Переключить тип рулетки по нажатию кнопки"""
         print("Method toggle_roulette_type() called.")
-        # Сначала меняем тип на противоположныйз
+
+        # ПРОВЕРЯЕМ, НЕ ВРАЩАЕТСЯ ЛИ КОЛЕСО
+        if self.is_spinning:
+            print("Колесо вращается, переключение типа запрещено")
+            # Можно показать всплывающее сообщение
+            return
+
+        # Сначала меняем тип на противоположный
         new_type = 'american' if self.roulette_type == 'european' else 'european'
         self.roulette_type = new_type
 
@@ -355,6 +365,16 @@ class RouletteScreen(BaseGameScreen):
         """Вернуться в главное меню"""
         self.manager.current = 'menu'
 
+    def set_switch_button_state(self, enabled):
+        """Включить/выключить кнопку переключения типа рулетки"""
+        if hasattr(self, 'type_switch_button') and self.type_switch_button:
+            self.type_switch_button.disabled = not enabled
+            # Опционально: визуальное обозначение неактивной кнопки
+            if enabled:
+                self.type_switch_button.opacity = 1.0
+            else:
+                self.type_switch_button.opacity = 0.5
+
     def spin_wheel(self, instance=None):
         """Запуск вращения колеса рулетки (без шарика)"""
         if self.is_spinning or not self.wheel:
@@ -362,13 +382,16 @@ class RouletteScreen(BaseGameScreen):
 
         print(f"🎰 Запускаю вращение колеса {self.roulette_type} рулетки...")
 
+        # ОТКЛЮЧАЕМ КНОПКУ SWITCH
+        self.set_switch_button_state(False)
+
         # Сбрасываем флаг запуска шарика
         self.ball_launched = False
 
         # Останавливаем все звуки
         self.stop_all_sounds()
 
-        # Запускаем звук вращения колеса - ИЗМЕНЕНО название файла
+        # Запускаем звук вращения колеса
         self.play_wheel_spin_sound()
 
         self.is_spinning = True
@@ -384,7 +407,7 @@ class RouletteScreen(BaseGameScreen):
 
         print(f"Начальный угол: {current_angle}°, целевой: {target_angle}°")
 
-        # Создаем анимацию - ИЗМЕНЕНО время с 20.0 на 16.0
+        # Создаем анимацию
         anim = Animation(
             angle=target_angle,
             duration=16.0,  # 16 секунд вращения
@@ -400,7 +423,7 @@ class RouletteScreen(BaseGameScreen):
         # Сохраняем анимацию для возможной остановки
         self.current_animation = anim
 
-        # Запускаем таймер на случай, если анимация не завершится - ИЗМЕНЕНО с 22.0 на 18.0
+        # Запускаем таймер на случай, если анимация не завершится
         self.spin_timer = Clock.schedule_once(self._force_stop_wheel, 18.0)
 
     def _on_spin_progress(self, animation, widget, progress):
@@ -462,6 +485,9 @@ class RouletteScreen(BaseGameScreen):
         if not self.ball_launched:
             self.stop_all_sounds()
 
+        # ВКЛЮЧАЕМ КНОПКУ SWITCH
+        self.set_switch_button_state(True)
+
         # Сбрасываем флаги
         self.is_spinning = False
 
@@ -478,6 +504,9 @@ class RouletteScreen(BaseGameScreen):
             if not self.ball_launched:
                 self.stop_all_sounds()
 
+            # ВКЛЮЧАЕМ КНОПКУ SWITCH
+            self.set_switch_button_state(True)
+
             # Сбрасываем флаги
             self.is_spinning = False
 
@@ -489,7 +518,7 @@ class RouletteScreen(BaseGameScreen):
         """Показывает результат после запуска шарика"""
         print("🎯 Шарик остановился, показываю результат")
 
-        # Останавливаем звук шарика (теперь он точно нужен)
+        # Останавливаем звук шарика
         if self.ball_roll_sound:
             self.ball_roll_sound.stop()
 
@@ -506,6 +535,9 @@ class RouletteScreen(BaseGameScreen):
         self.is_spinning = False
         self.ball_launched = False
         self.ball_timer = None
+
+        # ВКЛЮЧАЕМ КНОПКУ SWITCH
+        self.set_switch_button_state(True)
 
         # Получаем случайный результат
         winning_sector = self._get_winning_sector()
@@ -815,11 +847,14 @@ class RouletteScreen(BaseGameScreen):
         self.is_spinning = False
         self.ball_launched = False
 
+        # ВКЛЮЧАЕМ КНОПКУ SWITCH (на случай если она была отключена)
+        self.set_switch_button_state(True)
+
         # Сбрасываем угол колеса для единообразия (опционально)
         if self.wheel:
             self.wheel.angle = 0
 
-        # Восстанавливаем кнопку
+        # Восстанавливаем кнопку шарика
         if self.spin_button:
             self.spin_button.opacity = 1
             self.spin_button.disabled = False

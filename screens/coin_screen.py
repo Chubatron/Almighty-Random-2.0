@@ -709,7 +709,8 @@ class CoinScreen(BaseGameScreen):
         self.fullscreen_touch_area = None  # Область на весь экран для возврата
         self.info_label = None
         self.stats_label = None
-        self.flip_sound = None
+        self.flip_sound = None  # Звук вращения монеты
+        self.crystal_sound = None  # Звук для финальной анимации
         self.particle_system = None  # Система частиц
         self.return_animation_active = False  # Флаг для анимации возврата
         self.is_animating = False  # Флаг, указывающий, идет ли какая-либо анимация
@@ -765,6 +766,7 @@ class CoinScreen(BaseGameScreen):
         # Пересоздаем UI при каждом входе
         self.setup_game_ui()
         self.load_flip_sound()
+        self.load_crystal_sound()
         Window.bind(on_resize=self.on_window_resize)
 
         # Сбрасываем монету на стартовую позицию с первым кадром
@@ -852,11 +854,17 @@ class CoinScreen(BaseGameScreen):
         # Но так как мы не храним ссылки на все lambda функции, просто пропускаем это
         # Анимации будут остановлены через Animation.cancel_all()
 
-        # Останавливаем звук
+        # Останавливаем звуки
         self.stop_flip_sound()
+        self.stop_crystal_sound()
+
         if self.flip_sound:
             self.flip_sound.unload()
             self.flip_sound = None
+
+        if self.crystal_sound:
+            self.crystal_sound.unload()
+            self.crystal_sound = None
 
         # Очищаем монету
         if self.coin:
@@ -915,6 +923,18 @@ class CoinScreen(BaseGameScreen):
         else:
             pass
 
+    def load_crystal_sound(self):
+        """Загружает звук для финальной анимации"""
+        sound_path = 'assets/sounds/coin/crystal.ogg'
+
+        if os.path.exists(sound_path):
+            self.crystal_sound = SoundLoader.load(sound_path)
+            if self.crystal_sound:
+                self.crystal_sound.volume = 1.0
+                print("✅ Загружен звук crystal.ogg")
+        else:
+            print("⚠️ Файл crystal.ogg не найден")
+
     def play_flip_sound(self):
         """Воспроизводит звук вращения монеты"""
         if self.flip_sound:
@@ -929,6 +949,22 @@ class CoinScreen(BaseGameScreen):
         """Останавливает звук вращения монеты"""
         if self.flip_sound and self.flip_sound.state == 'play':
             self.flip_sound.stop()
+
+    def play_crystal_sound(self):
+        """Воспроизводит звук для финальной анимации"""
+        if self.crystal_sound:
+            try:
+                if self.crystal_sound.state == 'play':
+                    self.crystal_sound.stop()
+                self.crystal_sound.play()
+                print("🔊 Воспроизводится crystal.ogg")
+            except Exception as e:
+                print(f"⚠️ Ошибка воспроизведения crystal.ogg: {e}")
+
+    def stop_crystal_sound(self):
+        """Останавливает звук финальной анимации"""
+        if self.crystal_sound and self.crystal_sound.state == 'play':
+            self.crystal_sound.stop()
 
     def setup_game_ui(self):
         # Проверяем наличие файлов
@@ -1326,6 +1362,9 @@ class CoinScreen(BaseGameScreen):
         if self.coin:
             self.coin.opacity = 0
 
+        # Запускаем звук crystal.ogg с задержкой 1 секунда
+        Clock.schedule_once(lambda dt: self.play_crystal_sound(), 1.5)
+
         # Выбираем нужный спрайт-лист в зависимости от результата
         if result == 0:
             final_spritesheet = self.final_spritesheet_orel
@@ -1378,6 +1417,7 @@ class CoinScreen(BaseGameScreen):
         grow_anim.bind(on_complete=on_grow_complete)
         grow_anim.start(self.final_coin)
 
+        # Останавливаем звук вращения, если он еще играет
         self.stop_flip_sound()
 
         # Обновляем текущую сторону для следующего раза
@@ -1391,6 +1431,9 @@ class CoinScreen(BaseGameScreen):
         if self.fullscreen_touch_area:
             self.fullscreen_touch_area.is_enabled = False
         self.return_animation_active = True
+
+        # Останавливаем звук crystal.ogg
+        self.stop_crystal_sound()
 
         # Останавливаем анимацию финальной монеты
         if self.final_coin:

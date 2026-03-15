@@ -138,7 +138,7 @@ class IntermediateMagicBall(MainMenuScreen):
             pass
 
         back_btn = BackImageButton(
-            source='assets/images/buttons/Orange_back_to_menu_button.png',
+            source='assets/images/buttons/red.png',
             size_hint=(None, None),
             size=(60, 60),
             pos_hint={'x': 0.05, 'y': 0.02},

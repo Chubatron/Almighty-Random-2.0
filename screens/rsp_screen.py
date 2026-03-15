@@ -289,6 +289,16 @@ class RSPScreen(GameScreen):
             self.spin_button.is_active = 1
             self.spin_button.disabled = False
 
+    def set_switch_button_state(self, enabled):
+        """Включить/выключить кнопку переключения типа игры"""
+        if hasattr(self, 'type_switch_button') and self.type_switch_button:
+            self.type_switch_button.disabled = not enabled
+            # Визуальное обозначение неактивной кнопки
+            if enabled:
+                self.type_switch_button.opacity = 1.0
+            else:
+                self.type_switch_button.opacity = 0.5
+
     def reset_spinner(self):
         """Сбрасывает спиннер в стартовое положение"""
         # Останавливаем все звуки
@@ -517,6 +527,9 @@ class RSPScreen(GameScreen):
 
         print("🎡 Spin button pressed - starting rotation (counter-clockwise)")
 
+        # ОТКЛЮЧАЕМ КНОПКУ SWITCH
+        self.set_switch_button_state(False)
+
         # Воспроизводим звук вращения спиннера
         self.play_spin_sound()
 
@@ -654,6 +667,9 @@ class RSPScreen(GameScreen):
     def _finish_spin(self):
         """Завершение вращения с показом результата"""
         self.is_spinning = False
+
+        # ВКЛЮЧАЕМ КНОПКУ SWITCH
+        self.set_switch_button_state(True)
 
         # Проверяем, существует ли еще spin_button
         if self.spin_button:

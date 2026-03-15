@@ -176,7 +176,7 @@ class BaseGameScreen(Screen):
             pass
 
         back_btn = ImageButton(
-            source='assets/images/buttons/Orange_back_to_menu_button.png',
+            source='assets/images/buttons/bronze_button.png',
             size_hint=(None, None),
             size=(60, 60),
             pos_hint={'x': 0.02, 'y': 0.88},  # Левый верхний угол
