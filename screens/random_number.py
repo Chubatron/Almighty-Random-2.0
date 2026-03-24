@@ -1,6 +1,6 @@
-from screens.game_screen import GameScreen
+from screens.magic_ball_screen import MagicBallScreen
 
-class RandomNumberScreen(GameScreen):
+class RandomNumberScreen(MagicBallScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = 'random_number'

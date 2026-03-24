@@ -1,25 +1,32 @@
-# screens/intermediate_roulette.py - пример обновления
+# screens/intermediate_roulette.py
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 from kivy.uix.image import Image
 from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.audio import SoundLoader
+from kivy.uix.behaviors import ButtonBehavior
+from kivy.uix.button import Button
 from animated_background import AnimatedBackground
 from components.icon_button import IconButton
-from screens.intermediate_base_screen import IntermediateScreen  # Новый импорт
+from screens.intermediate_base_screen import IntermediateScreen
 import os
 
 
-class IntermediateRoulette(IntermediateScreen):  # Наследуемся от IntermediateScreen
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)  # Вызовет конструктор IntermediateScreen
+class IntermediateRoulette(IntermediateScreen):
+    """Промежуточный экран для выбора типа рулетки"""
 
-        layout = self.layout  # Используем layout из родителя
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        # Удаляем стандартную кнопку из родителя
+        if hasattr(self, 'back_button') and self.back_button:
+            self.layout.remove_widget(self.back_button)
+            self.back_button = None
 
         # Анимированный фон
         self.background = AnimatedBackground()
-        layout.add_widget(self.background)
+        self.layout.add_widget(self.background)
 
         # Статический фон (полупрозрачный)
         bg = Image(
@@ -30,11 +37,11 @@ class IntermediateRoulette(IntermediateScreen):  # Наследуемся от I
             fit_mode='fill',
             opacity=0.7
         )
-        layout.add_widget(bg)
+        self.layout.add_widget(bg)
 
         # Заголовок
         title = Label(
-            text='SELECT AN ITEM',
+            text='SELECT ROULETTE TYPE',
             font_name='assets/fonts/JockeyOne-Regular.ttf',
             font_size='32sp',
             bold=True,
@@ -42,17 +49,19 @@ class IntermediateRoulette(IntermediateScreen):  # Наследуемся от I
             outline_color=(0, 0, 0, 1),
             outline_width=2,
             size_hint=(None, None),
-            size=(400, 50),
+            size=(500, 50),
             pos_hint={'center_x': 0.5, 'top': 0.95}
         )
-        layout.add_widget(title)
+        self.layout.add_widget(title)
 
         # Загружаем звук для кнопки назад
         self.load_back_sound()
 
-        # Создаем кнопки
-        self.create_buttons(layout)
-        self.add_back_button(layout)
+        # Создаем кнопки выбора рулетки
+        self.create_buttons()
+
+        # Создаем кнопку назад с картинкой
+        self.create_back_button()
 
     def load_back_sound(self):
         """Загружает звук для кнопки назад"""
@@ -77,54 +86,45 @@ class IntermediateRoulette(IntermediateScreen):  # Наследуемся от I
             except:
                 pass
 
-    def create_buttons(self, layout):
-        """Создает кнопки видов спорта"""
+    def create_buttons(self):
+        """Создает кнопки выбора типа рулетки"""
         sports = [
-            ('Roulette', 'assets/images/buttons/Blue_roulette_button.png', 'roulette', self.change_to_game),
-            ('RusRoulette', 'assets/images/buttons/Red_rus_roulette_button.png', 'rus_roulette', self.change_to_game),
+            ('Classic Roulette', 'assets/images/buttons/Blue_roulette_button.png', 'roulette', self.change_to_game),
+            ('Russian Roulette', 'assets/images/buttons/Red_rus_roulette_button.png', 'rus_roulette',
+             self.change_to_game),
         ]
 
-        # Сетка 5x2
-        rows, cols = 2, 1
-        button_width, button_height = 0.2, 0.2
-        horizontal_spacing, vertical_spacing = 0.1, 0.02
-        start_x, start_y = 0.5 - (button_width / 2), 0.65
+        # Располагаем кнопки по центру
+        button_width, button_height = 0.3, 0.2
+        start_x = 0.35
+        start_y = 0.6
+        vertical_spacing = 0.05
 
         for i, (text, icon_path, screen_name, callback) in enumerate(sports):
-            row, col = i // cols, i % cols
-            x_pos = start_x + col * (button_width + horizontal_spacing)
-            y_pos = start_y - row * (button_height + vertical_spacing)
+            y_pos = start_y - i * (button_height + vertical_spacing)
 
             btn = IconButton(
                 text=text,
                 icon_path=icon_path,
                 sport=screen_name,
                 size_hint=(button_width, button_height),
-                pos_hint={'x': x_pos, 'y': y_pos},
+                pos_hint={'x': start_x, 'y': y_pos},
                 callback=callback
             )
 
-            layout.add_widget(btn)
+            self.layout.add_widget(btn)
 
-    def change_to_game(self, instance):
-        """Переход к игровому экрану"""
-        print(f"Переход на {instance.sport}")
-        self.go_to_game(instance.sport)  # Используем метод из родителя
-        self.manager.get_screen(instance.sport).start_game()
-
-    def create_back_button(self, layout):
-        """Создает кнопку назад с картинкой и звуком"""
-        from kivy.uix.behaviors import ButtonBehavior
-        from kivy.uix.image import Image
+    def create_back_button(self):
+        """Создает кнопку назад с картинкой"""
 
         class BackImageButton(ButtonBehavior, Image):
             pass
 
         back_btn = BackImageButton(
-            source='assets/images/buttons/bronze_button.png',
+            source='assets/images/buttons/Orange_back_to_menu_button.png',
             size_hint=(None, None),
-            size=(60, 60),  # Увеличиваем размер
-            pos_hint={'x': 0.05, 'y': 0.02},
+            size=(60, 60),
+            pos_hint={'x': 0.09, 'y': 0.055},
             allow_stretch=True
         )
 
@@ -133,29 +133,26 @@ class IntermediateRoulette(IntermediateScreen):  # Наследуемся от I
 
         def on_release(instance):
             Animation(opacity=1.0, duration=0.1).start(instance)
-            # УБИРАЕМ play_back_sound() ОТСЮДА
             Clock.schedule_once(lambda dt: self.go_to_menu(), 0.1)
 
         back_btn.bind(on_press=on_press)
         back_btn.bind(on_release=on_release)
 
-        layout.add_widget(back_btn)
+        self.layout.add_widget(back_btn)
         return back_btn
 
-    def add_back_button(self, layout):
-        """Добавляет кнопку назад на layout"""
-        # Проверяем, есть ли уже кнопка назад
-        for child in layout.children:
-            if hasattr(child, 'source') and 'back_icon' in child.source:
-                return
+    def change_to_game(self, instance):
+        """Переход к игровому экрану"""
+        print(f"🎲 Переход на {instance.sport}")
 
-        # Создаем новую кнопку
-        self.create_back_button(layout)
+        # Запускаем игру
+        if hasattr(self.manager.get_screen(instance.sport), 'start_game'):
+            self.manager.get_screen(instance.sport).start_game()
+
+        # Переходим на экран игры
+        self.manager.current = instance.sport
 
     def go_to_menu(self):
         """Переход в меню с воспроизведением звука"""
-        # Воспроизводим звук
         self.play_back_sound()
-
-        # Переходим в меню
         self.manager.current = 'menu'
