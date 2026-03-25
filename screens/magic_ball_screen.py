@@ -3,14 +3,18 @@ Magic Ball Screen - экран с фоном и мячом из спрайт-л�
 """
 import os
 import math
+import json
+import random
 from kivy.uix.image import Image
 from kivy.uix.widget import Widget
+from kivy.uix.label import Label
 from kivy.properties import StringProperty, NumericProperty, ListProperty, ObjectProperty
 from kivy.clock import Clock
 from kivy.animation import Animation
 from kivy.vector import Vector
-from kivy.graphics import Color, Rectangle, Ellipse
+from kivy.graphics import Color, Rectangle
 from kivy.graphics.texture import Texture
+from kivy.core.text import Label as CoreLabel
 from PIL import Image as PILImage
 import numpy as np
 from screens.base_game_screen import BaseGameScreen
@@ -26,13 +30,12 @@ class SpriteSheetBall(Widget):
     frame_index = NumericProperty(0)
     velocity = ListProperty([0, 0])
 
-    # Параметры тени
     show_shadow = NumericProperty(1)
     shadow_offset_x = NumericProperty(0)
     shadow_offset_y = NumericProperty(0)
     shadow_alpha = NumericProperty(0.5)
-    shadow_extra_offset = NumericProperty(0)  # Дополнительное смещение для отдаления тени
-    shadow_scale = NumericProperty(1.0)  # Масштаб тени
+    shadow_extra_offset = NumericProperty(0)
+    shadow_scale = NumericProperty(1.0)
 
     _texture = ObjectProperty(None, allownone=True)
     _frame_width = NumericProperty(0)
@@ -42,7 +45,6 @@ class SpriteSheetBall(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        # Загружаем спрайт-лист
         if self.sprite_sheet_path and os.path.exists(self.sprite_sheet_path):
             self._load_spritesheet(self.sprite_sheet_path)
 
@@ -60,16 +62,11 @@ class SpriteSheetBall(Widget):
         )
 
     def _load_spritesheet(self, path):
-        """Загружает спрайт-лист и обрезает фон вокруг мяча"""
         try:
             img = PILImage.open(path)
             self._frame_width = img.width // self.cols
             self._frame_height = img.height // self.rows
             self._ball_bounds = self._find_ball_bounds(img, 0, 0)
-
-            print(f"✅ Спрайт-лист загружен: {self.rows}x{self.cols} кадров")
-            print(f"   Размер кадра: {self._frame_width}x{self._frame_height}")
-            print(f"   Границы мяча: {self._ball_bounds}")
 
             self._texture = Texture.create(size=img.size, colorfmt='rgba' if img.mode == 'RGBA' else 'rgb')
             if img.mode == 'RGBA':
@@ -80,11 +77,10 @@ class SpriteSheetBall(Widget):
             self.size = (self.ball_size, self.ball_size)
             self._update_display()
 
-        except Exception as e:
-            print(f"❌ Ошибка загрузки спрайт-листа: {e}")
+        except Exception:
+            pass
 
     def _find_ball_bounds(self, img, col, row):
-        """Находит границы мяча в указанном кадре (обрезает фон)"""
         frame_x = col * self._frame_width
         frame_y = row * self._frame_height
         frame = img.crop((frame_x, frame_y, frame_x + self._frame_width, frame_y + self._frame_height))
@@ -115,7 +111,6 @@ class SpriteSheetBall(Widget):
         return [int(x_min), int(y_min), int(x_max - x_min + 1), int(y_max - y_min + 1)]
 
     def _update_display(self, *args):
-        """Обновляет отображение текущего кадра с динамической тенью"""
         if not self._texture or self.width == 0:
             return
 
@@ -149,13 +144,7 @@ class SpriteSheetBall(Widget):
         self.canvas.clear()
 
         with self.canvas:
-            # Тень (отдаляется от мяча при движении)
             if self.show_shadow:
-                # Смещение тени = базовое + дополнительное (отдаление)
-                shadow_x = self.x + self.shadow_offset_x
-                shadow_y = self.y + self.shadow_offset_y + self.shadow_extra_offset
-
-                # Масштаб тени (увеличивается при отдалении)
                 shadow_size = (self.size[0] * self.shadow_scale,
                               self.size[1] * self.shadow_scale)
                 shadow_x = self.x + (self.size[0] - shadow_size[0]) / 2 + self.shadow_offset_x
@@ -165,7 +154,6 @@ class SpriteSheetBall(Widget):
                 Rectangle(pos=(shadow_x, shadow_y), size=shadow_size,
                          texture=self._texture, tex_coords=tex_coords)
 
-            # Мяч
             Color(1, 1, 1, 1)
             Rectangle(pos=self.pos, size=self.size, texture=self._texture, tex_coords=tex_coords)
 
@@ -182,8 +170,6 @@ class SpriteSheetBall(Widget):
 
 
 class BallPhysics:
-    """Класс для физики мяча"""
-
     def __init__(self, pos, size, screen_width, screen_height, sound_callback=None):
         self.pos = Vector(pos)
         self.velocity = Vector(0, 0)
@@ -194,9 +180,12 @@ class BallPhysics:
         self.friction = 0.995
         self.bounce_factor = 0.85
         self.min_speed = 1
+        self.active = True
 
     def update(self, dt):
-        """Обновляет позицию мяча"""
+        if not self.active:
+            return False
+
         self.velocity *= self.friction
 
         if self.velocity.length() < self.min_speed:
@@ -209,28 +198,32 @@ class BallPhysics:
         return bounced
 
     def _check_boundaries(self, pos):
-        """Проверяет отскоки от краёв экрана"""
         bounced = False
+        bounce_speed = 0
 
         if pos.x - self.radius < 0:
+            bounce_speed = abs(self.velocity.x)
             self.velocity.x = abs(self.velocity.x) * self.bounce_factor
             pos.x = self.radius
             bounced = True
         if pos.x + self.radius > self.screen_width:
+            bounce_speed = abs(self.velocity.x)
             self.velocity.x = -abs(self.velocity.x) * self.bounce_factor
             pos.x = self.screen_width - self.radius
             bounced = True
         if pos.y - self.radius < 0:
+            bounce_speed = abs(self.velocity.y)
             self.velocity.y = abs(self.velocity.y) * self.bounce_factor
             pos.y = self.radius
             bounced = True
         if pos.y + self.radius > self.screen_height:
+            bounce_speed = abs(self.velocity.y)
             self.velocity.y = -abs(self.velocity.y) * self.bounce_factor
             pos.y = self.screen_height - self.radius
             bounced = True
 
         if bounced and self.sound_callback:
-            self.sound_callback()
+            self.sound_callback(bounce_speed)
 
         return bounced
 
@@ -240,13 +233,136 @@ class BallPhysics:
     def is_stopped(self):
         return self.velocity.length() < self.min_speed
 
+    def deactivate(self):
+        self.active = False
+        self.velocity = Vector(0, 0)
+
+    def reset(self, pos):
+        self.pos = Vector(pos)
+        self.velocity = Vector(0, 0)
+        self.active = True
+
+
+class AnswerManager:
+    def __init__(self, locales_path='locales'):
+        self.locales_path = locales_path
+        self.answers = {}
+        self.answer_keys = [
+            "yes", "no", "maybe", "think_twice",
+            "doubt_dont_do", "try_other_side", "definitely_yes", "definitely_no"
+        ]
+        self._load_answers()
+
+    def _load_answers(self):
+        en_file = os.path.join(self.locales_path, 'en.json')
+
+        if os.path.exists(en_file):
+            try:
+                with open(en_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                for key in self.answer_keys:
+                    if key in data:
+                        self.answers[key] = data[key]
+
+            except Exception:
+                self._create_default_answers()
+        else:
+            self._create_default_answers()
+
+        missing_keys = []
+        for key in self.answer_keys:
+            if key not in self.answers or not self.answers[key]:
+                missing_keys.append(key)
+
+        if missing_keys:
+            self._fill_missing_answers(missing_keys)
+
+    def _create_default_answers(self):
+        default_answers = {
+            "yes": "YES",
+            "no": "NO",
+            "maybe": "MAYBE",
+            "think_twice": "THINK TWICE",
+            "doubt_dont_do": "IF IN DOUBT, DON'T",
+            "try_other_side": "TRY THE OTHER SIDE",
+            "definitely_yes": "DEFINITELY YES",
+            "definitely_no": "DEFINITELY NO"
+        }
+
+        for key, value in default_answers.items():
+            self.answers[key] = value
+
+    def _fill_missing_answers(self, missing_keys):
+        default_answers = {
+            "yes": "YES",
+            "no": "NO",
+            "maybe": "MAYBE",
+            "think_twice": "THINK TWICE",
+            "doubt_dont_do": "IF IN DOUBT, DON'T",
+            "try_other_side": "TRY THE OTHER SIDE",
+            "definitely_yes": "DEFINITELY YES",
+            "definitely_no": "DEFINITELY NO"
+        }
+
+        for key in missing_keys:
+            if key in default_answers:
+                self.answers[key] = default_answers[key]
+
+    def get_random_answer(self):
+        if not self.answer_keys:
+            return "NO ANSWER AVAILABLE"
+
+        random_key = random.choice(self.answer_keys)
+
+        if random_key in self.answers:
+            return self.answers[random_key]
+
+        return f"ANSWER NOT FOUND: {random_key}"
+
+
+class AnswerLabel(Label):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.font_size = 48
+        self.color = (0, 0, 0, 1)
+        self.size_hint = (None, None)
+        self.opacity = 0
+        self.halign = 'center'
+        self.valign = 'middle'
+        self.text_size = (None, None)
+        self.bold = True
+
+    def show_answer(self, answer_text):
+        self.text = answer_text
+
+        label = CoreLabel(text=answer_text, font_size=self.font_size, font_name='Roboto-Bold')
+        label.refresh()
+        text_size = label.texture.size
+
+        padding = 20
+        self.width = text_size[0] + padding * 2
+        self.height = text_size[1] + padding
+
+        screen_width = self.parent.width if self.parent else 800
+        screen_height = self.parent.height if self.parent else 600
+        self.x = (screen_width - self.width) / 2
+        self.y = (screen_height - self.height) / 2
+
+        self.opacity = 0
+        anim = Animation(opacity=1, duration=0.5, t='out_quad')
+        anim.start(self)
+
+    def hide_answer(self):
+        anim = Animation(opacity=0, duration=0.3, t='in_quad')
+        anim.start(self)
+
 
 class MagicBallScreen(BaseGameScreen):
-    """Экран с фоном и мячом из спрайт-листа с физикой"""
 
     background_path = StringProperty('assets/backgrounds/football_bg.jpg')
     sprite_sheet_path = StringProperty('assets/sprites/sprites_football_ball.png')
-    bounce_sound_path = StringProperty('assets/sounds/bounce.wav')
+    bounce_sound_path = StringProperty('assets/sounds/football_bounce.wav')
 
     def __init__(self, **kwargs):
         if 'background_path' not in kwargs:
@@ -264,13 +380,27 @@ class MagicBallScreen(BaseGameScreen):
         self.last_velocity = Vector(0, 0)
         self.is_stopping = False
 
-        # Параметры отдаления тени (УВЕЛИЧЕНЫ ДЛЯ БОЛЬШЕГО ЭФФЕКТА)
-        self.shadow_distance = 0  # Текущее расстояние отдаления тени
-        self.shadow_timer = 0  # Таймер для волнового эффекта
-        self.base_shadow_offset_x = self.ball_size * 0.12  # Базовое смещение по X
-        self.base_shadow_offset_y = self.ball_size * 0.12  # Базовое смещение по Y
-        self.max_shadow_distance = self.ball_size * 1.5  # УВЕЛИЧЕНО: максимальное отдаление тени (150% от размера)
-        self.max_shadow_scale = 1.2  # УВЕЛИЧЕНО: максимальный масштаб тени (180% от размера)
+        self.is_zoom_animation = False
+        self.zoom_animation_counter = 0
+        self.zoom_animation_scheduled = False
+        self.is_falling_animation = False
+        self.is_rolling_animation = False
+        self.waiting_for_touch = False
+        self.animation_paused = False
+
+        self.answer_manager = AnswerManager('locales')
+        self.answer_label = None
+        self.answer_displayed = False
+
+        self.original_center = None
+        self.original_pos = None
+
+        self.shadow_distance = 0
+        self.shadow_timer = 0
+        self.base_shadow_offset_x = self.ball_size * 0.12
+        self.base_shadow_offset_y = self.ball_size * 0.12
+        self.max_shadow_distance = self.ball_size * 1.5
+        self.max_shadow_scale = 1.2
 
         self._load_bounce_sound()
 
@@ -279,61 +409,103 @@ class MagicBallScreen(BaseGameScreen):
         if os.path.exists(self.bounce_sound_path):
             self.bounce_sound = SoundLoader.load(self.bounce_sound_path)
             if self.bounce_sound:
-                self.bounce_sound.volume = 0.6
+                self.bounce_sound.volume = 0.7
 
-    def _play_bounce_sound(self):
+    def _play_bounce_sound(self, speed=0):
         if self.bounce_sound:
             try:
+                max_speed = 60
+                volume = min(1.0, speed / max_speed)
+                volume = max(0.3, volume)
+
+                self.bounce_sound.volume = volume
+                self.bounce_sound.stop()
                 self.bounce_sound.play()
-            except:
+            except Exception:
                 pass
 
+    def _play_impact_sound(self):
+        if self.bounce_sound:
+            try:
+                self.bounce_sound.volume = 1.0
+                self.bounce_sound.stop()
+                self.bounce_sound.play()
+            except Exception:
+                pass
+
+    def _get_random_ball_position(self):
+        screen_width = self.layout.width
+        screen_height = self.layout.height
+
+        min_x = 0
+        max_x = screen_width - self.ball_size
+        random_x = random.uniform(min_x, max_x)
+
+        min_y = screen_height * 0.25
+        max_y = screen_height * 0.5
+        random_y = random.uniform(min_y, max_y)
+
+        return (random_x, random_y)
+
+    def _reset_to_initial_state(self):
+        Clock.unschedule(self._update_zoom_animation)
+        Clock.unschedule(self._animate_ball_fall)
+        Clock.unschedule(self._show_random_answer)
+
+        self.is_zoom_animation = False
+        self.is_falling_animation = False
+        self.is_rolling_animation = False
+        self.waiting_for_touch = False
+        self.animation_paused = False
+        self.is_stopping = False
+        self.is_moving = False
+        self.zoom_animation_scheduled = False
+
+        if self.answer_label and self.answer_displayed:
+            self.answer_label.hide_answer()
+            self.answer_displayed = False
+
+        if self.ball:
+            Animation.cancel_all(self.ball)
+
+            self.ball.ball_size = self.ball_size
+            self.ball.size = (self.ball_size, self.ball_size)
+            self.ball.opacity = 1
+            self.ball.show_shadow = 1
+            self.ball.frame_index = 0
+
+            screen_width = self.layout.width if self.layout else 800
+            screen_height = self.layout.height if self.layout else 600
+            center_x = screen_width / 2
+            center_y = screen_height / 2
+            self.ball.pos = (center_x - self.ball_size / 2, center_y - self.ball_size / 2)
+
+            if self.physics:
+                self.physics.reset((center_x, center_y))
+
     def _update_shadow_distance(self, speed):
-        """Обновляет расстояние отдаления тени в зависимости от скорости мяча (УВЕЛИЧЕННЫЙ ЭФФЕКТ)"""
-        # Максимальная скорость для максимального отдаления
-        max_speed = 60  # УМЕНЬШЕНО: эффект начинает проявляться при меньшей скорости
-        # Коэффициент отдаления от 0 до 1
+        max_speed = 60
         distance_coef = min(1.0, speed / max_speed)
 
-        if speed > 5:  # УМЕНЬШЕНО: эффект проявляется при меньшей скорости
-            # Мяч движется - создаем эффект отдаления тени
-            # Обновляем таймер для волнового эффекта (123454321)
-            self.shadow_timer += 0.05  # УВЕЛИЧЕНО: более быстрая пульсация
-
-            # Создаем волну: 0 -> 1 -> 2 -> 3 -> 4 -> 3 -> 2 -> 1 -> 0
-            t = self.shadow_timer * 1.0  # УВЕЛИЧЕНО: более частые колебания
+        if speed > 5:
+            self.shadow_timer += 0.05
+            t = self.shadow_timer * 1.0
             wave = math.sin(t)
-            # Нормализуем от 0 до 1
             wave_norm = abs(wave)
-
-            # Усиливаем эффект - используем квадрат для более резкого подъема
-            wave_norm = wave_norm ** 0.7  # Делает подъем более плавным в начале
-
-            # Умножаем на коэффициент скорости
+            wave_norm = wave_norm ** 0.7
             wave_norm = wave_norm * distance_coef
 
-            # Вычисляем расстояние отдаления тени (УВЕЛИЧЕНО)
             self.shadow_distance = self.max_shadow_distance * wave_norm
-
-            # Масштаб тени (увеличивается при отдалении)
             shadow_scale = 1.0 + (self.max_shadow_scale - 1.0) * wave_norm
 
-            # Обновляем параметры тени
-            # Тень отдаляется: увеличиваем смещение по Y (вниз) и по X
             self.ball.shadow_offset_x = self.base_shadow_offset_x + self.shadow_distance * 0.5
             self.ball.shadow_offset_y = self.base_shadow_offset_y + self.shadow_distance
-            self.ball.shadow_extra_offset = self.shadow_distance  # Дополнительное смещение для отдаления
-            self.ball.shadow_scale = shadow_scale  # Масштаб тени
-
-            # Отладка (выводим каждые 30 кадров)
-            if int(self.shadow_timer * 10) % 30 == 0:
-                print(f"💨 Скорость: {speed:.1f}, Отдаление: {self.shadow_distance:.1f}px, Масштаб: {shadow_scale:.2f}")
+            self.ball.shadow_extra_offset = self.shadow_distance
+            self.ball.shadow_scale = shadow_scale
         else:
-            # Мяч почти остановился - плавно возвращаем тень на место
             if self.shadow_distance > 0:
                 self.shadow_distance = 0
                 self.shadow_timer = 0
-                # Анимация возврата тени
                 anim = Animation(
                     shadow_offset_x=self.base_shadow_offset_x,
                     shadow_offset_y=self.base_shadow_offset_y,
@@ -344,7 +516,172 @@ class MagicBallScreen(BaseGameScreen):
                     t='out_quad'
                 )
                 anim.start(self.ball)
-                print(f"🔄 Тень возвращается на место")
+
+    def _animate_ball_fall(self):
+        self.is_falling_animation = True
+
+        screen_height = self.layout.height
+        target_y = -self.ball.height
+
+        total_frames = 12
+        self.fall_frame_counter = 0
+
+        def update_fall_frame(dt):
+            if not self.is_falling_animation:
+                return
+            if self.fall_frame_counter < total_frames:
+                self.ball.frame_index = self.fall_frame_counter
+                self.fall_frame_counter += 1
+                Clock.schedule_once(update_fall_frame, 1.0/20.0)
+
+        update_fall_frame(0)
+
+        anim = Animation(y=target_y, duration=0.5, t='in_quad')
+        anim.start(self.ball)
+
+        Clock.schedule_once(lambda dt: self._after_fall(), 0.5)
+
+    def _after_fall(self):
+        self.ball.opacity = 0
+        self.is_falling_animation = False
+        self.waiting_for_touch = True
+
+    def _animate_ball_roll_in(self):
+        self.is_rolling_animation = True
+
+        if self.answer_label and self.answer_displayed:
+            self.answer_label.hide_answer()
+            self.answer_displayed = False
+
+        self.ball.ball_size = self.ball_size
+        self.ball.size = (self.ball_size, self.ball_size)
+        self.ball.opacity = 1
+        self.ball.show_shadow = 1
+
+        target_pos = self._get_random_ball_position()
+        target_x = target_pos[0]
+        target_y = target_pos[1]
+
+        screen_width = self.layout.width
+        start_y = -self.ball.height
+        start_x = target_x
+
+        self.ball.pos = (start_x, start_y)
+
+        total_frames = 12
+        self.roll_frame_counter = 0
+
+        def update_roll_frame(dt):
+            if not self.is_rolling_animation:
+                return
+            if self.roll_frame_counter < total_frames:
+                self.ball.frame_index = self.roll_frame_counter
+                self.roll_frame_counter += 1
+                Clock.schedule_once(update_roll_frame, 1.0/20.0)
+
+        update_roll_frame(0)
+
+        anim_x = Animation(x=target_x, duration=0.6, t='out_quad')
+        anim_y = Animation(y=target_y, duration=0.6, t='out_quad')
+        anim_x.start(self.ball)
+        anim_y.start(self.ball)
+
+        Clock.schedule_once(lambda dt: self._after_roll_in(target_pos), 0.6)
+
+    def _after_roll_in(self, target_pos):
+        self.is_rolling_animation = False
+        self.waiting_for_touch = False
+
+        if self.physics:
+            center_x = target_pos[0] + self.ball_size / 2
+            center_y = target_pos[1] + self.ball_size / 2
+            self.physics.reset((center_x, center_y))
+
+        self.is_zoom_animation = False
+        self.is_stopping = False
+        self.is_moving = False
+        self.zoom_animation_scheduled = False
+        self.animation_paused = False
+
+    def _show_random_answer(self):
+        answer_text = self.answer_manager.get_random_answer()
+
+        if not self.answer_label:
+            self.answer_label = AnswerLabel()
+            self.layout.add_widget(self.answer_label)
+
+        self.answer_label.show_answer(answer_text)
+        self.answer_displayed = True
+
+        Clock.schedule_once(lambda dt: self._animate_ball_fall(), 0.1)
+
+    def _start_zoom_animation(self):
+        if self.is_zoom_animation:
+            return
+
+        if not self.ball:
+            return
+
+        if self.physics:
+            self.physics.deactivate()
+
+        self.zoom_animation_scheduled = False
+        self.is_zoom_animation = True
+        self.zoom_animation_counter = 0
+
+        self.original_ball_size = self.ball_size
+        self.original_pos = (self.ball.x, self.ball.y)
+        self.ball.show_shadow = 0
+
+        screen_width = self.layout.width
+        screen_height = self.layout.height
+
+        self.target_size = screen_width * 3
+
+        screen_center_x = screen_width / 2
+        screen_center_y = screen_height / 2
+
+        self.target_x = screen_center_x - self.target_size / 2
+        self.target_y = screen_center_y - self.target_size / 2
+
+        self._update_zoom_animation(0)
+
+    def _update_zoom_animation(self, dt):
+        if not self.is_zoom_animation:
+            return
+
+        total_frames = 12
+
+        if self.zoom_animation_counter < total_frames:
+            self.ball.frame_index = self.zoom_animation_counter
+
+            progress = self.zoom_animation_counter / total_frames
+            ease_progress = 1 - (1 - progress) ** 2
+
+            current_size = self.original_ball_size + (self.target_size - self.original_ball_size) * ease_progress
+            current_x = self.original_pos[0] + (self.target_x - self.original_pos[0]) * ease_progress
+            current_y = self.original_pos[1] + (self.target_y - self.original_pos[1]) * ease_progress
+
+            self.ball.ball_size = current_size
+            self.ball.size = (current_size, current_size)
+            self.ball.pos = (current_x, current_y)
+
+            self.zoom_animation_counter += 1
+
+            frame_duration = 1.0 / 15.0
+            Clock.schedule_once(self._update_zoom_animation, frame_duration)
+        else:
+            self.ball.ball_size = self.target_size
+            self.ball.size = (self.target_size, self.target_size)
+            self.ball.pos = (self.target_x, self.target_y)
+            self.ball.frame_index = 10
+
+            self._play_impact_sound()
+
+            self.is_zoom_animation = False
+            self.animation_paused = True
+
+            Clock.schedule_once(lambda dt: self._show_random_answer(), 0.1)
 
     def on_enter(self):
         super().on_enter()
@@ -355,13 +692,16 @@ class MagicBallScreen(BaseGameScreen):
     def on_leave(self):
         super().on_leave()
         Clock.unschedule(self._update_physics)
+        if self.answer_label:
+            self.layout.remove_widget(self.answer_label)
+
+        self._reset_to_initial_state()
 
     def _setup_ui(self):
         if os.path.exists(self.background_path):
             bg = Image(source=self.background_path, allow_stretch=True,
                       keep_ratio=False, size_hint=(1, 1))
             self.layout.add_widget(bg, index=0)
-            print("✅ Фон добавлен")
 
         self._create_ball()
 
@@ -396,40 +736,12 @@ class MagicBallScreen(BaseGameScreen):
             sound_callback=self._play_bounce_sound
         )
 
-        print(f"✅ Мяч создан в центре экрана, размер={self.ball_size}px")
-        print(f"   Максимальное отдаление тени: {self.max_shadow_distance:.1f}px")
-        print(f"   Максимальный масштаб тени: {self.max_shadow_scale:.1f}x")
+        self.original_pos = (center_x, center_y)
 
     def _rollback_ball(self, dt):
         if not self.ball or not self.physics:
             return
 
-        if self.last_velocity.length() > 0:
-            direction = self.last_velocity.normalize()
-            rollback_distance = 3
-            rollback_x = direction.x * rollback_distance
-            rollback_y = direction.y * rollback_distance
-
-            new_x = self.ball.x + rollback_x
-            new_y = self.ball.y + rollback_y
-
-            anim = Animation(x=new_x, y=new_y, duration=0.1, t='out_quad')
-            anim.start(self.ball)
-
-        total_frames = self.ball.rows * self.ball.cols
-        current_frame = self.ball.frame_index
-
-        if self.last_velocity.x < 0:
-            new_frame = (current_frame + 2) % total_frames
-        else:
-            new_frame = (current_frame - 2) % total_frames
-
-        def update_frame(dt):
-            self.ball.frame_index = new_frame
-
-        Clock.schedule_once(update_frame, 0.05)
-
-        # Возвращаем тень в исходное положение
         anim_shadow = Animation(
             shadow_offset_x=self.base_shadow_offset_x,
             shadow_offset_y=self.base_shadow_offset_y,
@@ -443,11 +755,19 @@ class MagicBallScreen(BaseGameScreen):
 
         self.is_stopping = False
 
+        Clock.schedule_once(lambda dt: self._start_zoom_animation(), 0.5)
+
     def _update_physics(self, dt):
         if not self.ball or not self.physics:
             return
 
+        if self.is_zoom_animation or self.is_falling_animation or self.is_rolling_animation or self.animation_paused:
+            return
+
         if self.is_stopping:
+            return
+
+        if not self.physics.active:
             return
 
         self.last_velocity = Vector(self.physics.velocity)
@@ -458,8 +778,6 @@ class MagicBallScreen(BaseGameScreen):
                          self.physics.pos.y - self.ball_size / 2)
 
         speed = self.physics.velocity.length()
-
-        # Обновляем отдаление тени в зависимости от скорости
         self._update_shadow_distance(speed)
 
         is_stopped = self.physics.is_stopped()
@@ -488,6 +806,10 @@ class MagicBallScreen(BaseGameScreen):
             self.layout.add_widget(self.back_button)
 
     def on_touch_down(self, touch):
+        if self.waiting_for_touch:
+            self._animate_ball_roll_in()
+            return True
+
         if self.ball and self.ball.is_point_on_ball(touch.x, touch.y):
             self.touch_start = touch.pos
             touch.grab(self)
@@ -505,7 +827,9 @@ class MagicBallScreen(BaseGameScreen):
             end = Vector(touch.pos)
             force = (end - start) * 0.3
 
-            print(f"🚀 Бросок мяча: сила=({force.x:.1f}, {force.y:.1f})")
+            if self.physics:
+                self.physics.active = True
+                self.physics.velocity = Vector(0, 0)
 
             self.physics.apply_force(force)
 
@@ -513,6 +837,13 @@ class MagicBallScreen(BaseGameScreen):
             self.is_moving = True
             self.is_stopping = False
             self.shadow_timer = 0
+            self.zoom_animation_scheduled = False
+            self.is_zoom_animation = False
+            self.animation_paused = False
+
+            if self.answer_displayed:
+                self.answer_label.hide_answer()
+                self.answer_displayed = False
 
             self.touch_start = None
             touch.ungrab(self)
@@ -520,5 +851,5 @@ class MagicBallScreen(BaseGameScreen):
         return super().on_touch_up(touch)
 
     def go_to_menu(self, instance=None):
-        print("🏠 Возврат в меню из MagicBallScreen")
+        self._reset_to_initial_state()
         super().go_to_menu()
