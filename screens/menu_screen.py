@@ -2,11 +2,16 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.image import Image
 from kivy.uix.label import Label
-from animated_background import AnimatedBackground
 from components.control_panel import ControlPanel
 from components.icon_button import IconButton
 from sound_manager import SoundManager
 
+import sys
+import os
+
+# Добавляем корневую папку в путь
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from animated_background import AnimatedBackground
 
 class MainMenuScreen(Screen):
     """Главное меню с кнопками"""
@@ -65,7 +70,7 @@ class MainMenuScreen(Screen):
     def create_buttons(self, layout):
         """Создает кнопки видов спорта"""
         sports = [
-            ('MagicBall', 'assets/images/buttons/Football_ball_button.png', 'magic_ball', self.change_to_game),
+            ('MagicBal', 'assets/images/buttons/Football_ball_button.png', 'magic_ball', self.change_to_game),
             ('Dice', 'assets/images/buttons/Dice_button.png', 'dice', self.change_to_game),
             ('Roulette', 'assets/images/buttons/Blue_roulette_button.png', 'intermediate_roulette', self.change_to_intermediate_roulette),  # ← Изменено
             ('Random', 'assets/images/buttons/Green_random_button.png', 'random', self.change_to_game),
