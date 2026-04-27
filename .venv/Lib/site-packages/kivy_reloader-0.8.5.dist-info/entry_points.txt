@@ -1,0 +1,4 @@
+[console_scripts]
+bump = scripts.bump_version:main
+kivy-reloader = kivy_reloader.bootstrap:main
+subset-fonts = scripts.subset_fonts:main
