@@ -3,910 +3,877 @@ import time
 import subprocess
 import json
 import sys
-import shutil
-from datetime import datetime
 
 PACKAGE = "org.almighty.almightyrandom"
-# PACKAGE = "org.test.almightyrandom"
 APP_DIR = f"/data/data/{PACKAGE}/files/app"
-FILES_DIR = f"/data/data/{PACKAGE}/files"
 ADB = "adb.exe"
 
+# Файл для сохранения состояния
 STATE_FILE = "sync_state.json"
-DEVICES_CONFIG = "devices_config.json"
-
-
-class DeviceManager:
-    """Управление несколькими устройствами"""
-
-    def __init__(self):
-        self.devices = []
-        self.config_file = DEVICES_CONFIG
-        self.load_config()
-
-    def load_config(self):
-        """Загружает конфигурацию устройств"""
-        if os.path.exists(self.config_file):
-            with open(self.config_file, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                self.devices = config.get('devices', [])
-        else:
-            self.devices = []
-            self.save_config()
-
-    def save_config(self):
-        """Сохраняет конфигурацию устройств"""
-        config = {'devices': self.devices}
-        with open(self.config_file, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
-
-    def scan_devices(self):
-        """Сканирует подключенные устройства"""
-        result = subprocess.run(f'{ADB} devices', shell=True, capture_output=True, text=True)
-        lines = result.stdout.strip().split('\n')[1:]
-
-        found_devices = []
-        for line in lines:
-            if 'device' in line and 'offline' not in line:
-                device_id = line.split()[0]
-                if '_adb-tls-connect' in device_id:
-                    continue
-                conn_type = "USB" if ":" not in device_id else "WiFi"
-                found_devices.append({
-                    'id': device_id,
-                    'name': self.get_device_name(device_id),
-                    'type': conn_type,
-                    'enabled': True,
-                    'last_sync': None
-                })
-
-        return found_devices
-
-    def get_device_name(self, device_id):
-        """Получает имя устройства"""
-        try:
-            result = subprocess.run(
-                f'{ADB} -s {device_id} shell getprop ro.product.model',
-                shell=True, capture_output=True, text=True, timeout=5
-            )
-            return result.stdout.strip()
-        except:
-            return device_id[:8]
-
-    def add_device(self, device_id, name=None):
-        """Добавляет устройство в конфиг"""
-        if not name:
-            name = self.get_device_name(device_id)
-
-        device = {
-            'id': device_id,
-            'name': name,
-            'type': 'WiFi' if ':' in device_id else 'USB',
-            'enabled': True,
-            'last_sync': None
-        }
-
-        for i, d in enumerate(self.devices):
-            if d['id'] == device_id:
-                self.devices[i] = device
-                break
-        else:
-            self.devices.append(device)
-
-        self.save_config()
-        return device
-
-    def remove_device(self, device_id):
-        """Удаляет устройство из конфига"""
-        self.devices = [d for d in self.devices if d['id'] != device_id]
-        self.save_config()
-
-    def get_enabled_devices(self):
-        """Возвращает список включенных устройств"""
-        return [d for d in self.devices if d.get('enabled', True)]
-
-    def get_usb_devices(self):
-        """Возвращает список подключенных USB устройств"""
-        connected = self.scan_devices()
-        return [d for d in connected if d['type'] == 'USB']
-
-    def select_devices(self, prompt="Выберите устройства"):
-        """Интерактивный выбор устройств"""
-        enabled_devices = self.get_enabled_devices()
-
-        if not enabled_devices:
-            print("Нет настроенных устройств!")
-            return []
-
-        print(f"\n{prompt}:")
-        print("0. Все устройства")
-        for i, device in enumerate(enabled_devices, 1):
-            status = "✓" if device.get('enabled', True) else "✗"
-            print(f"  {i}. [{status}] {device['name']} ({device['id']}) - {device['type']}")
-        print(f"  {len(enabled_devices) + 1}. Управление устройствами")
-
-        while True:
-            try:
-                choice = input("\nВаш выбор: ").strip()
-                if choice == "0":
-                    return enabled_devices
-                elif choice == str(len(enabled_devices) + 1):
-                    self.manage_devices()
-                    return self.select_devices(prompt)
-                elif choice.isdigit():
-                    idx = int(choice) - 1
-                    if 0 <= idx < len(enabled_devices):
-                        return [enabled_devices[idx]]
-                print("Неверный выбор!")
-            except KeyboardInterrupt:
-                return []
-
-    def manage_devices(self):
-        """Управление устройствами"""
-        while True:
-            print("\n" + "=" * 50)
-            print("УПРАВЛЕНИЕ УСТРОЙСТВАМИ")
-            print("=" * 50)
-
-            connected = self.scan_devices()
-
-            print("\nПОДКЛЮЧЕННЫЕ УСТРОЙСТВА:")
-            if connected:
-                for device in connected:
-                    is_enabled = any(d['id'] == device['id'] for d in self.devices)
-                    status = "✓" if is_enabled else "○"
-                    print(f"  {status} {device['name']} - {device['id']} ({device['type']})")
-            else:
-                print("  Нет подключенных устройств")
-
-            print("\nНАСТРОЕННЫЕ УСТРОЙСТВА:")
-            if self.devices:
-                for i, device in enumerate(self.devices, 1):
-                    status = "ВКЛ" if device.get('enabled', True) else "ВЫКЛ"
-                    print(f"  {i}. {device['name']} - {status}")
-                    print(f"     ID: {device['id']}")
-                    if device.get('last_sync'):
-                        print(f"     Последняя синхронизация: {device['last_sync']}")
-            else:
-                print("  Нет настроенных устройств")
-
-            print("\n" + "-" * 50)
-            print("Доступные действия:")
-            print("  1. Добавить устройство по IP (WiFi)")
-            print("  2. Добавить USB устройство")
-            print("  3. Включить/выключить устройство")
-            print("  4. Удалить устройство")
-            print("  5. Обновить список")
-            print("  6. Назад в главное меню")
-
-            choice = input("\nВыбор: ").strip()
-
-            if choice == "1":
-                self.add_wifi_device()
-            elif choice == "2":
-                self.add_usb_device()
-            elif choice == "3":
-                self.toggle_device()
-            elif choice == "4":
-                self.remove_device_interactive()
-            elif choice == "5":
-                continue
-            elif choice == "6":
-                break
-            else:
-                print("Неверный выбор!")
-
-    def add_wifi_device(self):
-        """Добавление WiFi устройства"""
-        print("\nПОДКЛЮЧЕНИЕ ПО WiFi")
-        ip = input("\nВведите IP адрес телефона: ").strip()
-        if not ip:
-            return
-
-        device_id = f"{ip}:5555"
-
-        print(f"Подключение к {device_id}...")
-        result = subprocess.run(f'{ADB} connect {device_id}', shell=True, capture_output=True, text=True, timeout=10)
-
-        if "connected" in result.stdout.lower():
-            print(f"Подключено к {device_id}")
-            name = input("Введите имя устройства (Enter - автоматически): ").strip()
-            self.add_device(device_id, name if name else None)
-        else:
-            print(f"Не удалось подключиться: {result.stdout}")
-
-    def add_usb_device(self):
-        """Добавление USB устройства"""
-        connected = self.scan_devices()
-        usb_devices = [d for d in connected if d['type'] == 'USB']
-
-        if not usb_devices:
-            print("Нет подключенных USB устройств!")
-            return
-
-        print("\nДоступные USB устройства:")
-        for i, device in enumerate(usb_devices, 1):
-            print(f"  {i}. {device['name']} - {device['id']}")
-
-        try:
-            choice = int(input("Выберите устройство: ")) - 1
-            if 0 <= choice < len(usb_devices):
-                device = usb_devices[choice]
-                self.add_device(device['id'])
-                print(f"Устройство {device['name']} добавлено!")
-        except:
-            print("Неверный выбор!")
-
-    def toggle_device(self):
-        """Включить/выключить устройство"""
-        if not self.devices:
-            print("Нет настроенных устройств!")
-            return
-
-        print("\nВыберите устройство для изменения статуса:")
-        for i, device in enumerate(self.devices, 1):
-            status = "ВКЛ" if device.get('enabled', True) else "ВЫКЛ"
-            print(f"  {i}. {device['name']} - {status}")
-
-        try:
-            choice = int(input("Выбор: ")) - 1
-            if 0 <= choice < len(self.devices):
-                self.devices[choice]['enabled'] = not self.devices[choice].get('enabled', True)
-                self.save_config()
-                new_status = "ВКЛЮЧЕНО" if self.devices[choice]['enabled'] else "ВЫКЛЮЧЕНО"
-                print(f"Устройство {self.devices[choice]['name']} - {new_status}")
-        except:
-            print("Неверный выбор!")
-
-    def remove_device_interactive(self):
-        """Интерактивное удаление устройства"""
-        if not self.devices:
-            print("Нет настроенных устройств!")
-            return
-
-        print("\nВыберите устройство для удаления:")
-        for i, device in enumerate(self.devices, 1):
-            print(f"  {i}. {device['name']} - {device['id']}")
-        print(f"  {len(self.devices) + 1}. Отмена")
-
-        try:
-            choice = int(input("Выбор: ")) - 1
-            if 0 <= choice < len(self.devices):
-                confirm = input(f"Удалить {self.devices[choice]['name']}? (y/n): ").lower()
-                if confirm == 'y':
-                    self.remove_device(self.devices[choice]['id'])
-                    print("Устройство удалено!")
-        except:
-            print("Неверный выбор!")
-
-
-class MultiDeviceSync:
-    """Синхронизация с несколькими устройствами"""
-
-    def __init__(self):
-        self.device_manager = DeviceManager()
-        self.state_file = STATE_FILE
-
-    def load_state(self, device_id=None):
-        """Загружает состояние для устройства"""
-        if device_id:
-            state_file = f"sync_state_{device_id.replace(':', '_')}.json"
-        else:
-            state_file = self.state_file
-
-        if os.path.exists(state_file):
-            with open(state_file, 'r') as f:
-                return json.load(f)
-        return {}
-
-    def save_state(self, state, device_id=None):
-        """Сохраняет состояние для устройства"""
-        if device_id:
-            state_file = f"sync_state_{device_id.replace(':', '_')}.json"
-        else:
-            state_file = self.state_file
-
-        with open(state_file, 'w') as f:
-            json.dump(state, f)
-
-    def run_adb(self, device_id, command):
-        """Выполняет ADB команду на конкретном устройстве"""
-        if 'run-as' in command:
-            full_cmd = f'{ADB} -s {device_id} shell "{command}"'
-        else:
-            full_cmd = f'{ADB} -s {device_id} {command}'
-
-        result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True)
-        return result
-
-    def copy_directory(self, device_id, local_dir, remote_dir):
-        """Копирует целую папку на устройство (быстро)"""
-        try:
-            dir_name = os.path.basename(local_dir)
-            temp_dir = f"/data/local/tmp/{dir_name}"
-
-            # 1. Копируем всю папку на устройство
-            push_cmd = f'{ADB} -s {device_id} push {local_dir} /data/local/tmp/'
-            result = subprocess.run(push_cmd, shell=True, capture_output=True, text=True)
-
-            if result.returncode != 0:
-                print(f"   Ошибка push папки: {result.stderr}")
-                return False
-
-            # 2. Создаем целевую папку
-            mkdir_cmd = f'run-as {PACKAGE} mkdir -p {remote_dir}'
-            self.run_adb(device_id, mkdir_cmd)
-
-            # 3. Копируем содержимое из временной папки
-            cp_cmd = f'run-as {PACKAGE} cp -r {temp_dir}/* {remote_dir}/'
-            result = self.run_adb(device_id, cp_cmd)
-
-            # 4. Удаляем временную папку
-            self.run_adb(device_id, f'shell rm -rf {temp_dir}')
-
-            if result.returncode != 0:
-                print(f"   Ошибка cp папки: {result.stderr}")
-                return False
-
-            return True
-        except Exception as e:
-            print(f"   Ошибка: {e}")
-            return False
-
-    def copy_file(self, device_id, local_path, remote_dir):
-        """Копирует один файл на устройство"""
-        try:
-            filename = os.path.basename(local_path)
-            temp_file = f"/data/local/tmp/{filename}"
-
-            # 1. Копируем во временную директорию
-            push_cmd = f'{ADB} -s {device_id} push "{local_path}" /data/local/tmp/'
-            result_push = subprocess.run(push_cmd, shell=True, capture_output=True, text=True)
-
-            if result_push.returncode != 0:
-                return False
-
-            # 2. Создаем целевую директорию
-            mkdir_cmd = f'run-as {PACKAGE} mkdir -p "{remote_dir}"'
-            self.run_adb(device_id, mkdir_cmd)
-
-            # 3. Копируем из временной в целевую
-            cp_cmd = f'run-as {PACKAGE} cp "{temp_file}" "{remote_dir}/"'
-            result_cp = self.run_adb(device_id, cp_cmd)
-
-            # 4. Удаляем временный файл
-            self.run_adb(device_id, f'shell rm "{temp_file}"')
-
-            return result_cp.returncode == 0
-        except Exception as e:
-            return False
-
-    def push_assets(self, device_id):
-        """Копирует папку assets целиком"""
-        try:
-            print("   Копирование папки assets...")
-            return self.copy_directory(device_id, "assets", f"{APP_DIR}/assets")
-        except Exception as e:
-            print(f"   Ошибка: {e}")
-            return False
-
-    def delete_sync_files_on_phone(self, device_id):
-        """Удаляет файлы на устройстве"""
-        # Удаляем папки целиком (быстрее)
-        self.run_adb(device_id, f'run-as {PACKAGE} rm -rf {APP_DIR}/screens')
-        self.run_adb(device_id, f'run-as {PACKAGE} rm -rf {APP_DIR}/components')
-        self.run_adb(device_id, f'run-as {PACKAGE} rm -rf {APP_DIR}/locales')
-        self.run_adb(device_id, f'run-as {PACKAGE} rm -rf {APP_DIR}/assets')
-        self.run_adb(device_id, f'run-as {PACKAGE} rm -f {APP_DIR}/main.py')
-        self.run_adb(device_id, f'run-as {PACKAGE} rm -f {APP_DIR}/sound_manager.py')
-        self.run_adb(device_id, f'run-as {PACKAGE} rm -f {FILES_DIR}/settings.json')
-
-    def restart_app(self, device_id):
-        """Перезапускает приложение на устройстве"""
-        self.run_adb(device_id, f'am force-stop {PACKAGE}')
-        time.sleep(0.5)
-        self.run_adb(device_id, f'am start -n {PACKAGE}/org.kivy.android.PythonActivity')
-
-    def get_files_to_watch(self):
-        """Возвращает список файлов для отслеживания"""
-        files_to_watch = []
-
-        if os.path.exists("main.py"):
-            files_to_watch.append("main.py")
-        if os.path.exists("settings.json"):
-            files_to_watch.append("settings.json")
-        if os.path.exists("sound_manager.py"):
-            files_to_watch.append("sound_manager.py")
-
-        if os.path.exists("screens"):
-            for f in os.listdir("screens"):
-                if f.endswith(".py") and f != "__init__.py":
-                    files_to_watch.append(f"screens/{f}")
-
-        if os.path.exists("components"):
-            for f in os.listdir("components"):
-                if f.endswith(".py") and f != "__init__.py":
-                    files_to_watch.append(f"components/{f}")
-
-        if os.path.exists("locales"):
-            for f in os.listdir("locales"):
-                if f.endswith(".json"):
-                    files_to_watch.append(f"locales/{f}")
-
-        return files_to_watch
-
-    def get_all_assets_files(self):
-        """Возвращает список файлов в assets"""
-        assets_files = []
-        assets_dir = "assets"
-
-        if os.path.exists(assets_dir):
-            for root, dirs, files in os.walk(assets_dir):
-                for file in files:
-                    if file.startswith('.'):
-                        continue
-                    rel_path = os.path.join(root, file)
-                    assets_files.append(rel_path)
-
-        return assets_files
-
-    def sync_to_device(self, device):
-        """Синхронизирует файлы на конкретное устройство (быстрая версия с папками)"""
-        device_id = device['id']
-        device_name = device['name']
-
-        print(f"\n{'=' * 50}")
-        print(f"СИНХРОНИЗАЦИЯ С {device_name} ({device_id})")
-        print(f"{'=' * 50}")
-
-        success_count = 0
-        error_count = 0
-
-        # 1. Копируем main.py
-        if os.path.exists("main.py"):
-            print("   📄 main.py")
-            if self.copy_file(device_id, "main.py", APP_DIR):
-                success_count += 1
-                print("   ✅ main.py")
-            else:
-                error_count += 1
-                print("   ❌ main.py")
-
-        # 2. Копируем settings.json
-        if os.path.exists("settings.json"):
-            print("   ⚙️ settings.json")
-            if self.copy_file(device_id, "settings.json", FILES_DIR):
-                success_count += 1
-                print("   ✅ settings.json")
-            else:
-                error_count += 1
-                print("   ❌ settings.json")
-
-        # 3. Копируем sound_manager.py
-        if os.path.exists("sound_manager.py"):
-            print("   🔊 sound_manager.py")
-            if self.copy_file(device_id, "sound_manager.py", APP_DIR):
-                success_count += 1
-                print("   ✅ sound_manager.py")
-            else:
-                error_count += 1
-                print("   ❌ sound_manager.py")
-
-        # 4. Копируем папку screens (целиком)
-        if os.path.exists("screens"):
-            print(f"\n📁 Копирование папки screens/...")
-            if self.copy_directory(device_id, "screens", f"{APP_DIR}/screens"):
-                # Считаем количество файлов в папке
-                screens_count = len([f for f in os.listdir("screens") if f.endswith(".py") and f != "__init__.py"])
-                success_count += screens_count
-                print(f"   ✅ Скопировано {screens_count} файлов из screens/")
-            else:
-                error_count += 1
-                print(f"   ❌ Ошибка копирования screens/")
-
-        # 5. Копируем папку components (целиком)
-        if os.path.exists("components"):
-            print(f"\n📁 Копирование папки components/...")
-            if self.copy_directory(device_id, "components", f"{APP_DIR}/components"):
-                components_count = len(
-                    [f for f in os.listdir("components") if f.endswith(".py") and f != "__init__.py"])
-                success_count += components_count
-                print(f"   ✅ Скопировано {components_count} файлов из components/")
-            else:
-                error_count += 1
-                print(f"   ❌ Ошибка копирования components/")
-
-        # 6. Копируем папку locales (целиком)
-        if os.path.exists("locales"):
-            print(f"\n📁 Копирование папки locales/...")
-            if self.copy_directory(device_id, "locales", f"{APP_DIR}/locales"):
-                locales_count = len([f for f in os.listdir("locales") if f.endswith(".json")])
-                success_count += locales_count
-                print(f"   ✅ Скопировано {locales_count} файлов из locales/")
-            else:
-                error_count += 1
-                print(f"   ❌ Ошибка копирования locales/")
-
-        # 7. Копируем папку assets (целиком)
-        if os.path.exists("assets"):
-            assets_count = len(self.get_all_assets_files())
-            print(f"\n📁 Копирование assets/ ({assets_count} файлов)...")
-            if self.push_assets(device_id):
-                success_count += assets_count
-                print(f"   ✅ Скопировано {assets_count} файлов из assets/")
-            else:
-                error_count += assets_count
-                print(f"   ❌ Ошибка копирования assets/")
-
-        # 8. Перезапускаем приложение
-        print(f"\n🔄 Перезапуск приложения...")
-        self.restart_app(device_id)
-
-        # Сохраняем время последней синхронизации
-        device['last_sync'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.device_manager.save_config()
-
-        print(f"\n{'=' * 50}")
-        print(f"РЕЗУЛЬТАТ СИНХРОНИЗАЦИИ:")
-        print(f"   ✅ Успешно: {success_count}")
-        print(f"   ❌ Ошибок: {error_count}")
-        print(f"{'=' * 50}")
-
-        return success_count > 0
-
-    def usb_sync_watch_mode(self, device):
-        """Режим слежения для USB устройства"""
-        device_id = device['id']
-        device_name = device['name']
-
-        print("\n" + "=" * 50)
-        print("РЕЖИМ СЛЕЖЕНИЯ (ГОРЯЧАЯ ПЕРЕЗАГРУЗКА)")
-        print("=" * 50)
-        print(f"Устройство: {device_name} ({device_id})")
-        print("\nПри сохранении файла (Ctrl+S) синхронизация произойдёт автоматически")
-        print("Приложение будет перезапускаться после каждого изменения")
-        print("\nНажмите Ctrl+C для выхода")
-        print("=" * 50)
-
-        files_to_watch = self.get_files_to_watch()
-        state = self.load_state(device_id)
-
-        try:
-            while True:
-                changed = False
-                for file in files_to_watch:
-                    if os.path.exists(file):
-                        mtime = os.path.getmtime(file)
-                        if mtime != state.get(file, 0):
-                            state[file] = mtime
-                            changed = True
-
-                            if changed:
-                                print(f"\n📝 Изменён: {file}")
-                                print(f"🔄 Синхронизация с {device_name}...")
-
-                                # Определяем целевую папку
-                                if file == "settings.json":
-                                    remote_dir = FILES_DIR
-                                elif file.startswith("screens/"):
-                                    remote_dir = f"{APP_DIR}/screens"
-                                elif file.startswith("components/"):
-                                    remote_dir = f"{APP_DIR}/components"
-                                elif file.startswith("locales/"):
-                                    remote_dir = f"{APP_DIR}/locales"
-                                else:
-                                    remote_dir = APP_DIR
-
-                                if self.copy_file(device_id, file, remote_dir):
-                                    print(f"   ✅ {os.path.basename(file)} скопирован")
-                                    self.restart_app(device_id)
-                                    print(f"   🔄 Приложение перезапущено")
-                                else:
-                                    print(f"   ❌ Ошибка синхронизации {file}")
-
-                                self.save_state(state, device_id)
-                                changed = False
-                                break
-
-                if not changed:
-                    time.sleep(1)
-        except KeyboardInterrupt:
-            print("\n\n👋 Выход из режима слежения...")
-
-    def usb_full_sync(self, device):
-        """Полная перезапись всех файлов на USB устройстве"""
-        device_id = device['id']
-        device_name = device['name']
-
-        print("\n" + "=" * 50)
-        print("ПОЛНАЯ ПЕРЕЗАПИСЬ ВСЕХ ФАЙЛОВ")
-        print("=" * 50)
-
-        confirm = input(f"Вы действительно хотите выполнить полную синхронизацию с {device_name}? (y/n): ")
-        if confirm.lower() != 'y':
-            print("Операция отменена")
-            return False
-
-        return self.sync_to_device(device)
-
-    def usb_sync(self):
-        """Быстрая синхронизация с USB устройствами (с внутренним меню)"""
-        print("\n" + "=" * 50)
-        print("СИНХРОНИЗАЦИЯ ПО USB")
-        print("=" * 50)
-
-        # Получаем USB устройства
-        usb_devices = self.device_manager.get_usb_devices()
-
-        if not usb_devices:
-            print("\n❌ Нет подключенных USB устройств!")
-            print("Убедитесь, что:")
-            print("  1. Телефон подключен по USB")
-            print("  2. Включена отладка по USB")
-            print("  3. Установлены драйверы ADB")
-            input("\nНажмите Enter для возврата...")
-            return False
-
-        print(f"\nНайдено USB устройств: {len(usb_devices)}")
-
-        # Показываем список USB устройств
-        for i, device in enumerate(usb_devices, 1):
-            print(f"\n{i}. {device['name']}")
-            print(f"   ID: {device['id']}")
-            print(f"   Тип: {device['type']}")
-
-        # Выбор устройств для синхронизации
-        print("\n" + "-" * 50)
-        print("Выберите USB устройство:")
-
-        for i in range(len(usb_devices)):
-            print(f"  {i + 1}. {usb_devices[i]['name']}")
-
-        print(f"  {len(usb_devices) + 1}. Отмена")
-
-        try:
-            choice = input("\nВаш выбор: ").strip()
-
-            if choice == str(len(usb_devices) + 1):
-                return False
-            elif choice.isdigit():
-                idx = int(choice) - 1
-                if 0 <= idx < len(usb_devices):
-                    selected_device = usb_devices[idx]
-                else:
-                    print("Неверный выбор!")
-                    return False
-            else:
-                print("Неверный выбор!")
-                return False
-
-            # Внутреннее меню для выбранного устройства
-            while True:
-                print(f"\n{'=' * 50}")
-                print(f"РАБОТА С УСТРОЙСТВОМ: {selected_device['name']}")
-                print(f"{'=' * 50}")
-                print("\nВыберите режим синхронизации:")
-                print("  1. Режим слежения за изменениями (Горячая перезагрузка)")
-                print("  2. Полная перезапись всех файлов")
-                print("  3. Выбрать другое устройство")
-                print("  4. Назад в главное меню")
-                print("-" * 50)
-
-                sub_choice = input("Ваш выбор (1-4): ").strip()
-
-                if sub_choice == "1":
-                    # Режим слежения
-                    temp_device = {
-                        'id': selected_device['id'],
-                        'name': selected_device['name'],
-                        'type': selected_device['type'],
-                        'enabled': True
-                    }
-                    self.usb_sync_watch_mode(temp_device)
-                elif sub_choice == "2":
-                    # Полная перезапись
-                    temp_device = {
-                        'id': selected_device['id'],
-                        'name': selected_device['name'],
-                        'type': selected_device['type'],
-                        'enabled': True
-                    }
-                    self.usb_full_sync(temp_device)
-                    input("\nНажмите Enter для продолжения...")
-                elif sub_choice == "3":
-                    # Выбрать другое устройство
-                    break
-                elif sub_choice == "4":
-                    return False
-                else:
-                    print("Неверный выбор!")
-
-            return True
-
-        except KeyboardInterrupt:
-            print("\n\nОперация отменена")
-            return False
-        except Exception as e:
-            print(f"\n❌ Ошибка: {e}")
-            return False
-
-    def full_sync_all(self):
-        """Полная синхронизация со всеми устройствами"""
-        devices = self.device_manager.select_devices("Выберите устройства для синхронизации")
-
-        if not devices:
-            print("Нет выбранных устройств!")
-            return
-
-        print(f"\n🔄 Начинаю синхронизацию с {len(devices)} устройством(ами)...")
-
-        success_devices = 0
-        for device in devices:
-            if self.sync_to_device(device):
-                success_devices += 1
-
-        print(f"\n{'=' * 50}")
-        print(f"ИТОГОВЫЙ ОТЧЕТ:")
-        print(f"   ✅ Успешно синхронизировано: {success_devices}/{len(devices)}")
-        print(f"{'=' * 50}")
-
-    def watch_mode_all(self):
-        """Режим слежения за изменениями для всех устройств"""
-        devices = self.device_manager.get_enabled_devices()
-
-        if not devices:
-            print("Нет включенных устройств!")
-            return
-
-        print("\n" + "=" * 50)
-        print("РЕЖИМ СЛЕЖЕНИЯ ЗА ИЗМЕНЕНИЯМИ")
-        print("=" * 50)
-        print(f"Отслеживается {len(devices)} устройств:")
-        for device in devices:
-            print(f"  • {device['name']} ({device['id']})")
-        print("\nПри сохранении файла (Ctrl+S) синхронизация произойдёт на ВСЕ устройства.")
-        print("Нажмите Ctrl+C для выхода в главное меню.")
-        print("=" * 50)
-
-        files_to_watch = self.get_files_to_watch()
-
-        states = {}
-        for device in devices:
-            states[device['id']] = self.load_state(device['id'])
-
-        try:
-            while True:
-                changed = False
-                for file in files_to_watch:
-                    if os.path.exists(file):
-                        mtime = os.path.getmtime(file)
-
-                        for device in devices:
-                            device_state = states[device['id']]
-                            if mtime != device_state.get(file, 0):
-                                device_state[file] = mtime
-                                changed = True
-
-                        if changed:
-                            print(f"\n📝 Изменён: {file}")
-
-                            for device in devices:
-                                print(f"\n🔄 Синхронизация с {device['name']}...")
-                                self.sync_single_file(device['id'], file)
-
-                            for device in devices:
-                                self.save_state(states[device['id']], device['id'])
-
-                            changed = False
-
-                if not changed:
-                    time.sleep(1)
-        except KeyboardInterrupt:
-            print("\n\n👋 Выход из режима слежения...")
-
-    def sync_single_file(self, device_id, filepath):
-        """Синхронизация одного файла с устройством"""
-        if filepath == "settings.json":
-            remote_dir = FILES_DIR
-        elif filepath.startswith("screens/"):
-            remote_dir = f"{APP_DIR}/screens"
-        elif filepath.startswith("components/"):
-            remote_dir = f"{APP_DIR}/components"
-        elif filepath.startswith("locales/"):
-            remote_dir = f"{APP_DIR}/locales"
-        else:
-            remote_dir = APP_DIR
-
-        if self.copy_file(device_id, filepath, remote_dir):
-            print(f"   ✅ {os.path.basename(filepath)} -> {device_id[:8]}")
-        else:
-            print(f"   ❌ Ошибка синхронизации {filepath} с {device_id[:8]}")
-
-        self.restart_app(device_id)
-
-
-def show_menu():
-    """Показывает главное меню"""
-    print("\n" + "=" * 50)
-    print("МУЛЬТИ-СИНХРОНИЗАЦИЯ С ТЕЛЕФОНАМИ")
+# Файл для сохранения выбранного устройства
+DEVICE_STATE_FILE = "device_state.json"
+
+def get_adb_devices():
+    """Получает список подключенных устройств"""
+    result = subprocess.run(f"{ADB} devices", shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+    lines = result.stdout.strip().split('\n')[1:]
+    
+    devices = []
+    for line in lines:
+        if line.strip() and 'device' in line:
+            device_id = line.split()[0]
+            devices.append(device_id)
+    return devices
+
+def load_selected_device():
+    """Загружает сохранённое устройство"""
+    if os.path.exists(DEVICE_STATE_FILE):
+        with open(DEVICE_STATE_FILE, 'r') as f:
+            data = json.load(f)
+            return data.get('device')
+    return None
+
+def save_selected_device(device):
+    """Сохраняет выбранное устройство"""
+    with open(DEVICE_STATE_FILE, 'w') as f:
+        json.dump({'device': device}, f)
+
+def select_device():
+    """Меню выбора устройства"""
     print("=" * 50)
-
-    sync = MultiDeviceSync()
-    devices = sync.device_manager.get_enabled_devices()
-    usb_devices = sync.device_manager.get_usb_devices()
-
-    print(f"\n📱 АКТИВНЫЕ УСТРОЙСТВА: {len(devices)}")
-    for device in devices:
-        print(f"   • {device['name']} - {device['type']}")
-
-    if usb_devices:
-        print(f"\n🔌 ПОДКЛЮЧЕННЫЕ USB УСТРОЙСТВА: {len(usb_devices)}")
-        for device in usb_devices:
-            print(f"   • {device['name']} - {device['id']}")
-
-    print("\n" + "-" * 50)
-    print("Выберите режим работы:")
-    print("  1. Режим слежения (авто-синхронизация при изменениях)")
-    print("  2. ПОЛНАЯ СИНХРОНИЗАЦИЯ (на все устройства)")
-    print("  3. СИНХРОНИЗАЦИЯ ПО USB (быстрая, без сохранения в список)")
-    print("  4. Управление устройствами")
-    print("  5. Показать список файлов")
-    print("  6. Выход")
-    print("-" * 50)
-
+    print("🔍 Поиск подключенных устройств...")
+    print("=" * 50)
+    
+    devices = get_adb_devices()
+    
+    if not devices:
+        print("❌ Не найдено ни одного подключенного устройства!")
+        return None
+    
+    print(f"\n✅ Найдено устройств: {len(devices)}\n")
+    
+    for i, device in enumerate(devices, 1):
+        try:
+            result = subprocess.run(f"{ADB} -s {device} shell getprop ro.product.model", 
+                                  shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+            model = result.stdout.strip()
+            print(f"  {i}. {device} - {model}")
+        except:
+            print(f"  {i}. {device}")
+    
+    print("\n" + "=" * 50)
+    print(" 0. Выход")
+    print("=" * 50)
+    
     while True:
         try:
-            choice = input("Ваш выбор (1-6): ").strip()
-            if choice in ["1", "2", "3", "4", "5", "6"]:
-                return choice
+            choice = input("\n👉 Выберите устройство: ")
+            choice = int(choice)
+            
+            if choice == 0:
+                return None
+            elif 1 <= choice <= len(devices):
+                selected = devices[choice - 1]
+                print(f"\n✅ Выбрано устройство: {selected}")
+                save_selected_device(selected)
+                return selected
             else:
-                print("Неверный ввод. Пожалуйста, введите 1-6.")
+                print(f"❌ Неверный выбор")
+        except ValueError:
+            print("❌ Введите число!")
         except KeyboardInterrupt:
-            return "6"
+            return None
 
+def load_state():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, 'r') as f:
+            return json.load(f)
+    return {}
 
-def main():
-    """Главная функция"""
+def save_state(state):
+    with open(STATE_FILE, 'w') as f:
+        json.dump(state, f)
+
+def format_size(size):
+    """Форматирует размер файла"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size < 1024.0:
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} TB"
+
+def get_assets_file_list(local_dir="assets"):
+    """Рекурсивно получает список всех файлов в папке assets"""
+    files = []
+    if not os.path.exists(local_dir):
+        return files
+    
+    for root, dirs, filenames in os.walk(local_dir):
+        for filename in filenames:
+            if filename.endswith(('.pyc', '.pyo', '.DS_Store')):
+                continue
+            full_path = os.path.join(root, filename)
+            relative_path = os.path.relpath(full_path, local_dir)
+            files.append({
+                "full_path": full_path,
+                "relative_path": relative_path.replace("\\", "/"),
+                "name": filename,
+                "size": os.path.getsize(full_path)
+            })
+    return files
+
+def list_assets_files_with_numbers(local_dir="assets"):
+    """Показывает все файлы в assets с номерами для выбора"""
+    files = get_assets_file_list(local_dir)
+    
+    if not files:
+        print("❌ В папке assets нет файлов")
+        return {}
+    
+    print("\n" + "=" * 70)
+    print("📁 ФАЙЛЫ В ПАПКЕ assets (будут скопированы с СОХРАНЕНИЕМ структуры папок):")
+    print("=" * 70)
+    
+    # Группируем по папкам
+    files_by_folder = {}
+    for file in files:
+        folder = os.path.dirname(file["relative_path"])
+        if not folder:
+            folder = "(корень)"
+        if folder not in files_by_folder:
+            files_by_folder[folder] = []
+        files_by_folder[folder].append(file)
+    
+    file_number = 1
+    file_map = {}
+    
+    for folder in sorted(files_by_folder.keys()):
+        print(f"\n📂 {folder}/")
+        for file in files_by_folder[folder]:
+            size_str = format_size(file["size"])
+            print(f"   {file_number:3}. {file['name']} ({size_str}) -> {file['relative_path']}")
+            file_map[file_number] = file
+            file_number += 1
+    
+    print(f"\n📊 Всего файлов: {len(files)}")
+    print("💡 При копировании будет сохранена ВСЯ структура папок")
+    return file_map
+
+def copy_single_file_to_assets(device):
+    """Копирует один выбранный файл в папку assets на устройстве с сохранением структуры"""
+    print("\n" + "=" * 50)
+    print("📋 КОПИРОВАНИЕ ФАЙЛА В assets")
+    print("=" * 50)
+    
+    # Показываем список файлов
+    file_map = list_assets_files_with_numbers("assets")
+    
+    if not file_map:
+        print("❌ Нет файлов для копирования!")
+        return
+    
     while True:
-        choice = show_menu()
+        try:
+            choice = input(f"\n👉 Выберите номер файла (1-{len(file_map)}) или 0 для выхода: ")
+            choice = int(choice)
+            
+            if choice == 0:
+                return
+            elif 1 <= choice <= len(file_map):
+                selected_file = file_map[choice]
+                break
+            else:
+                print(f"❌ Введите число от 1 до {len(file_map)}")
+        except ValueError:
+            print("❌ Введите число!")
+    
+    print(f"\n📄 Выбран файл: {selected_file['relative_path']}")
+    print(f"📏 Размер: {format_size(selected_file['size'])}")
+    print(f"📁 Локальный путь: {selected_file['full_path']}")
+    
+    confirm = input("\n🔄 Скопировать файл на устройство? (y/n): ")
+    if confirm.lower() != 'y':
+        print("❌ Отменено")
+        return
+    
+    print("\n🚀 Копирую файл...")
+    
+    # ВАЖНО: сохраняем полный относительный путь
+    target_file = f"{APP_DIR}/assets/{selected_file['relative_path']}"
+    target_dir = os.path.dirname(target_file)
+    
+    print(f"   📂 Целевая папка: {target_dir}")
+    print(f"   📄 Целевой файл: {target_file}")
+    
+    # Создаём папку на устройстве (с вложенными папками)
+    subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} mkdir -p {target_dir}"', shell=True)
+    
+    # Копируем файл во временную папку
+    result_push = subprocess.run(f"{ADB} -s {device} push \"{selected_file['full_path']}\" /data/local/tmp/temp_file", shell=True, capture_output=True)
+    if result_push.returncode != 0:
+        print(f"❌ Ошибка при копировании на устройство: {result_push.stderr}")
+        return
+    
+    # Копируем из временной папки в assets
+    result_cp = subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/temp_file {target_file}"', shell=True, capture_output=True)
+    if result_cp.returncode != 0:
+        print(f"❌ Ошибка при копировании в assets: {result_cp.stderr}")
+        return
+    
+    # Устанавливаем права
+    subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {target_file}"', shell=True)
+    
+    print(f"✅ Файл скопирован: {selected_file['relative_path']}")
+    
+    # Проверяем, что файл на месте
+    check_result = subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} ls -la {target_file}"', 
+                                shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+    if check_result.stdout.strip():
+        print(f"   ✅ Файл найден на устройстве!")
+        parts = check_result.stdout.strip().split()
+        if len(parts) >= 5:
+            print(f"   📏 Размер на устройстве: {parts[4]} байт")
+    else:
+        print(f"   ❌ Файл НЕ НАЙДЕН на устройстве!")
+    
+    # Спрашиваем, перезапустить ли приложение
+    restart = input("\n🔄 Перезапустить приложение? (y/n): ")
+    if restart.lower() == 'y':
+        print("🔄 Перезапускаем приложение...")
+        subprocess.run(f"{ADB} -s {device} shell am force-stop {PACKAGE}", shell=True)
+        time.sleep(1)
+        subprocess.run(f"{ADB} -s {device} shell am start -n {PACKAGE}/org.kivy.android.PythonActivity", shell=True)
+        print("✅ Приложение запущено")
 
-        if choice == "1":
-            sync = MultiDeviceSync()
-            sync.watch_mode_all()
-        elif choice == "2":
-            sync = MultiDeviceSync()
-            sync.full_sync_all()
-            input("\nНажмите Enter для возврата в меню...")
-        elif choice == "3":
-            sync = MultiDeviceSync()
-            sync.usb_sync()
-        elif choice == "4":
-            sync = MultiDeviceSync()
-            sync.device_manager.manage_devices()
-        elif choice == "5":
-            sync = MultiDeviceSync()
-            print_file_list()
-            input("\nНажмите Enter для возврата в меню...")
-        elif choice == "6":
-            print("\n👋 Завершение работы скрипта...")
-            sys.exit(0)
+def copy_multiple_files_to_assets(device):
+    """Копирует несколько выбранных файлов в папку assets с сохранением структуры"""
+    print("\n" + "=" * 50)
+    print("📋 КОПИРОВАНИЕ НЕСКОЛЬКИХ ФАЙЛОВ В assets")
+    print("=" * 50)
+    
+    file_map = list_assets_files_with_numbers("assets")
+    
+    if not file_map:
+        return
+    
+    print("\n💡 Введите номера файлов через запятую (например: 1,3,5)")
+    print("   Или укажите диапазон (например: 1-5)")
+    print("   Или 'a' для выбора всех файлов")
+    print("   Или '0' для выхода")
+    
+    while True:
+        choice = input("\n👉 Выберите файлы: ").strip().lower()
+        
+        if choice == '0':
+            return
+        
+        selected_numbers = set()
+        
+        if choice == 'a':
+            selected_numbers = set(file_map.keys())
+            print(f"✅ Выбраны все {len(selected_numbers)} файлов")
+            break
+        
+        # Разбираем ввод
+        parts = choice.replace(' ', '').split(',')
+        for part in parts:
+            if '-' in part:
+                try:
+                    start, end = map(int, part.split('-'))
+                    for num in range(start, end + 1):
+                        if 1 <= num <= len(file_map):
+                            selected_numbers.add(num)
+                except:
+                    print(f"⚠️ Неверный диапазон: {part}")
+            else:
+                try:
+                    num = int(part)
+                    if 1 <= num <= len(file_map):
+                        selected_numbers.add(num)
+                    else:
+                        print(f"⚠️ Число {num} вне диапазона (1-{len(file_map)})")
+                except:
+                    print(f"⚠️ Неверный ввод: {part}")
+        
+        if selected_numbers:
+            print(f"✅ Выбрано файлов: {len(selected_numbers)}")
+            break
+        else:
+            print("❌ Не выбрано ни одного файла! Попробуйте снова.")
+    
+    # Показываем список выбранных файлов
+    print("\n📋 Выбранные файлы:")
+    for num in sorted(selected_numbers):
+        print(f"   {num}. {file_map[num]['relative_path']} ({format_size(file_map[num]['size'])})")
+    
+    confirm = input(f"\n🔄 Скопировать {len(selected_numbers)} файл(ов) на устройство? (y/n): ")
+    if confirm.lower() != 'y':
+        print("❌ Отменено")
+        return
+    
+    print("\n🚀 Начинаю копирование...\n")
+    
+    success_count = 0
+    failed_count = 0
+    
+    for num in sorted(selected_numbers):
+        file_info = file_map[num]
+        target_file = f"{APP_DIR}/assets/{file_info['relative_path']}"
+        target_dir = os.path.dirname(target_file)
+        
+        print(f"📄 {file_info['relative_path']}")
+        
+        # Создаём папку на устройстве
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} mkdir -p {target_dir}"', shell=True)
+        
+        # Копируем файл во временную папку
+        result_push = subprocess.run(f"{ADB} -s {device} push \"{file_info['full_path']}\" /data/local/tmp/temp_file", shell=True, capture_output=True)
+        if result_push.returncode != 0:
+            print(f"   ❌ Ошибка push: {result_push.stderr}")
+            failed_count += 1
+            continue
+        
+        # Копируем из временной папки в assets
+        result_cp = subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/temp_file {target_file}"', shell=True, capture_output=True)
+        if result_cp.returncode != 0:
+            print(f"   ❌ Ошибка cp: {result_cp.stderr}")
+            failed_count += 1
+            continue
+        
+        # Устанавливаем права
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {target_file}"', shell=True)
+        
+        print(f"   ✅ Скопирован")
+        success_count += 1
+    
+    print(f"\n✅ Успешно скопировано: {success_count}/{len(selected_numbers)} файлов")
+    if failed_count > 0:
+        print(f"❌ Ошибок: {failed_count}")
+    
+    # Перезапуск приложения
+    restart = input("\n🔄 Перезапустить приложение? (y/n): ")
+    if restart.lower() == 'y':
+        print("Перезапускаем...")
+        subprocess.run(f"{ADB} -s {device} shell am force-stop {PACKAGE}", shell=True)
+        time.sleep(1)
+        subprocess.run(f"{ADB} -s {device} shell am start -n {PACKAGE}/org.kivy.android.PythonActivity", shell=True)
+        print("✅ Приложение запущено")
 
+def sync_file(filepath, device):
+    """Синхронизирует файл на выбранном устройстве"""
+    filename = os.path.basename(filepath)
+    print(f"🔄 {filepath}")
+    
+    # Копируем во временную папку
+    subprocess.run(f"{ADB} -s {device} push {filepath} /data/local/tmp/", shell=True, capture_output=True)
+    
+    if filepath.startswith("screens/"):
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/{filename} {APP_DIR}/screens/"', shell=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {APP_DIR}/screens/{filename}"', shell=True)
+    
+    elif filepath.startswith("components/"):
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/{filename} {APP_DIR}/components/"', shell=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {APP_DIR}/components/{filename}"', shell=True)
+    
+    elif filepath.startswith("locales/"):
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/{filename} {APP_DIR}/locales/"', shell=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {APP_DIR}/locales/{filename}"', shell=True)
+    
+    elif filepath.startswith("assets/"):
+        # Для assets сохраняем структуру папок
+        relative_path = filepath[7:]  # убираем "assets/"
+        target_file = f"{APP_DIR}/assets/{relative_path}"
+        target_dir = os.path.dirname(target_file)
+        
+        # Создаём папку
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} mkdir -p {target_dir}"', shell=True)
+        
+        # Копируем файл
+        subprocess.run(f"{ADB} -s {device} push {filepath} /data/local/tmp/temp_file", shell=True, capture_output=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/temp_file {target_file}"', shell=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {target_file}"', shell=True)
+    
+    elif filepath == "main.py":
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/{filename} {APP_DIR}/"', shell=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {APP_DIR}/{filename}"', shell=True)
+    
+    print(f"   ✅ {filename}")
 
-def print_file_list():
-    """Выводит список файлов"""
-    sync = MultiDeviceSync()
-    files = sync.get_files_to_watch()
-    assets_files = sync.get_all_assets_files()
+def sync_directory(local_dir, remote_dir, device):
+    """Синхронизирует целую директорию (добавляет/обновляет файлы, не удаляя существующие)"""
+    if not os.path.exists(local_dir):
+        print(f"⚠️ Папка {local_dir} не существует")
+        return
+    
+    print(f"📁 Синхронизация {local_dir}/")
+    
+    # Создаём удалённую папку (если не существует)
+    subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} mkdir -p {remote_dir}"', shell=True)
+    
+    for root, dirs, files in os.walk(local_dir):
+        for file in files:
+            if file.endswith(('.pyc', '.pyo', '.DS_Store')):
+                continue
+            
+            local_path = os.path.join(root, file)
+            relative_path = os.path.relpath(local_path, local_dir)
+            remote_path = f"{remote_dir}/{relative_path}".replace("\\", "/")
+            remote_file_dir = os.path.dirname(remote_path)
+            
+            # Создаём папку
+            subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} mkdir -p {remote_file_dir}"', shell=True)
+            
+            # Копируем файл
+            subprocess.run(f"{ADB} -s {device} push {local_path} /data/local/tmp/temp_file", shell=True, capture_output=True)
+            subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/temp_file {remote_path}"', shell=True)
+            subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {remote_path}"', shell=True)
+            
+            print(f"   ✅ {relative_path}")
 
+def sync_selected_folders(device):
+    """Выборочная синхронизация папок (БЕЗ УДАЛЕНИЯ существующих файлов)"""
+    print("\n" + "=" * 50)
+    print("📁 ВЫБОРОЧНАЯ СИНХРОНИЗАЦИЯ ПАПОК")
+    print("=" * 50)
+    
+    # Список доступных папок
+    folders = {
+        "1": {"name": "screens", "local": "screens", "remote": f"{APP_DIR}/screens"},
+        "2": {"name": "components", "local": "components", "remote": f"{APP_DIR}/components"},
+        "3": {"name": "locales", "local": "locales", "remote": f"{APP_DIR}/locales"},
+        "4": {"name": "assets", "local": "assets", "remote": f"{APP_DIR}/assets"},
+        "5": {"name": "main.py", "local": "main.py", "remote": f"{APP_DIR}/main.py", "is_file": True}
+    }
+    
+    # Проверяем какие папки существуют
+    available = []
+    for key, folder in folders.items():
+        if folder.get("is_file"):
+            if os.path.exists(folder["local"]):
+                available.append(key)
+                print(f" {key}. {folder['name']} (файл)")
+            else:
+                print(f" {key}. {folder['name']} (файл) [НЕ СУЩЕСТВУЕТ]")
+        else:
+            if os.path.exists(folder["local"]):
+                available.append(key)
+                print(f" {key}. {folder['name']}/")
+            else:
+                print(f" {key}. {folder['name']}/ [НЕ СУЩЕСТВУЕТ]")
+    
+    print(f"\n a. Выбрать все")
+    print(f" 0. Назад")
+    print("=" * 50)
+    
+    while True:
+        choice = input("\n👉 Выберите папки (через запятую, например: 1,2,4): ").strip().lower()
+        
+        if choice == '0':
+            return
+        elif choice == 'a':
+            selected_keys = available
+            print(f"\n✅ Выбраны все папки: {', '.join([folders[k]['name'] for k in selected_keys])}")
+            break
+        else:
+            try:
+                selected_keys = []
+                parts = choice.replace(' ', '').split(',')
+                for part in parts:
+                    if part in available:
+                        selected_keys.append(part)
+                    elif part in folders and part not in available:
+                        print(f"⚠️ Папка {folders[part]['name']} не существует локально")
+                    elif part not in folders:
+                        print(f"❌ Неверный выбор: {part}")
+                
+                if selected_keys:
+                    print(f"\n✅ Выбраны: {', '.join([folders[k]['name'] for k in selected_keys])}")
+                    break
+                else:
+                    print("❌ Не выбрано ни одной папки!")
+            except:
+                print("❌ Неверный формат!")
+    
+    confirm = input("\n🔄 Синхронизировать выбранные папки? (y/n): ")
+    if confirm.lower() != 'y':
+        print("❌ Отменено")
+        return
+    
+    print("\n🚀 Начинаю синхронизацию...\n")
+    
+    # Останавливаем приложение (кроме случаев, когда синхронизируем только assets)
+    if selected_keys != ['4']:
+        print("⏹️ Останавливаем приложение...")
+        subprocess.run(f"{ADB} -s {device} shell am force-stop {PACKAGE}", shell=True)
+        time.sleep(1)
+    
+    # Синхронизируем выбранные папки
+    for key in selected_keys:
+        folder = folders[key]
+        if folder.get("is_file"):
+            print(f"\n📄 {folder['name']}")
+            local_path = folder["local"]
+            if os.path.exists(local_path):
+                subprocess.run(f"{ADB} -s {device} push {local_path} /data/local/tmp/", shell=True, capture_output=True)
+                subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/{os.path.basename(local_path)} {folder["remote"]}"', shell=True)
+                subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {folder["remote"]}"', shell=True)
+                print(f"   ✅ {folder['name']}")
+            else:
+                print(f"   ❌ Файл не найден!")
+        else:
+            print(f"\n📁 {folder['name']}/")
+            if os.path.exists(folder["local"]):
+                sync_directory(folder["local"], folder["remote"], device)
+            else:
+                print(f"   ⚠️ Папка {folder['local']} не существует локально")
+    
+    # Очищаем только Python кэш
+    print("\n🧹 Очищаем Python кэш...")
+    subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} find {APP_DIR} -name *.pyc -delete"', shell=True)
+    
+    print("\n" + "=" * 50)
+    print("✅ СИНХРОНИЗАЦИЯ ЗАВЕРШЕНА")
+    print("=" * 50)
+    
+    # Перезапускаем приложение (если синхронизировали не только assets)
+    if selected_keys != ['4']:
+        print("\n🔄 Перезапускаем приложение...")
+        time.sleep(1)
+        subprocess.run(f"{ADB} -s {device} shell am start -n {PACKAGE}/org.kivy.android.PythonActivity", shell=True)
+    
+    show_logs = input("\n📋 Показать логи приложения? (y/n): ")
+    if show_logs.lower() == 'y':
+        show_app_logs(device)
+
+def check_assets(device):
+    """Проверяет наличие файлов assets на устройстве"""
+    print("\n" + "=" * 50)
+    print("🔍 ПРОВЕРКА ФАЙЛОВ ASSETS")
+    print("=" * 50)
+    
+    result = subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} find {APP_DIR}/assets -type d 2>/dev/null"', 
+                          shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+    
+    print("\n📁 Структура папок assets:")
+    for line in result.stdout.strip().split('\n'):
+        if line:
+            print(f"   {line}")
+    
+    result = subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} find {APP_DIR}/assets -name *.png 2>/dev/null"', 
+                          shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+    
+    print("\n🖼️ Найденные PNG файлы:")
+    for line in result.stdout.strip().split('\n'):
+        if line:
+            size_result = subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} ls -la {line} 2>/dev/null"', 
+                                       shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+            print(f"   {line}")
+            if size_result.stdout:
+                print(f"      {size_result.stdout.strip()}")
+    
+    test_paths = [
+        f"{APP_DIR}/assets/images/buttons/neon_button.png"
+    ]
+    
+    print("\n🔍 Проверка наличия neon_button.png:")
+    for path in test_paths:
+        result = subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} ls -la {path} 2>/dev/null"', 
+                              shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        if result.stdout.strip():
+            print(f"   ✅ НАЙДЕН: {path}")
+            print(f"      {result.stdout.strip()}")
+        else:
+            print(f"   ❌ НЕ НАЙДЕН: {path}")
+
+def show_app_logs(device):
+    """Показывает логи только вашего приложения"""
     print("\n" + "=" * 60)
-    print("СПИСОК ОТСЛЕЖИВАЕМЫХ ФАЙЛОВ И ПАПОК")
+    print("📋 ЛОГИ ПРИЛОЖЕНИЯ AlmightyRandom")
     print("=" * 60)
-
-    print(f"\n📊 ВСЕГО ФАЙЛОВ: {len(files) + len(assets_files)}")
-    print(f"   • Код и настройки: {len(files)}")
-    print(f"   • Ресурсы (assets): {len(assets_files)}")
+    
+    print("🧹 Очищаем старые логи...")
+    subprocess.run(f"{ADB} -s {device} logcat -c", shell=True)
+    
+    print("🚀 Запускаем приложение...")
+    subprocess.run(f"{ADB} -s {device} shell am start -n {PACKAGE}/org.kivy.android.PythonActivity", shell=True)
+    
+    print("⏳ Ждём 5 секунд...")
+    time.sleep(5)
+    
+    print("\n" + "=" * 60)
+    print("ЛОГИ ПРИЛОЖЕНИЯ:")
     print("=" * 60)
+    
+    result = subprocess.run(f'{ADB} -s {device} logcat -d | findstr /i "{PACKAGE} python Kivy Traceback FATAL AndroidRuntime"', 
+                          shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+    
+    if result.stdout:
+        lines = result.stdout.strip().split('\n')
+        lines = lines[-100:]
+        error_found = False
+        for line in lines:
+            if 'FATAL' in line or 'Exception' in line or 'Traceback' in line or 'Error' in line:
+                print(f"\033[91m{line}\033[0m")
+                error_found = True
+            elif 'Warning' in line or 'WARNING' in line:
+                print(f"\033[93m{line}\033[0m")
+            else:
+                print(line)
+        
+        if not error_found:
+            print("\n✅ Нет критических ошибок в логах")
+    else:
+        print("❌ Нет логов. Возможно, приложение не запустилось или упало сразу")
+    
+    print("\n" + "=" * 60)
+    print("СТАТУС ПРИЛОЖЕНИЯ:")
+    print("=" * 60)
+    
+    result = subprocess.run(f"{ADB} -s {device} shell pidof {PACKAGE}", 
+                          shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+    
+    if result.stdout.strip():
+        pid = result.stdout.strip()
+        print(f"✅ ПРИЛОЖЕНИЕ ЗАПУЩЕНО (PID: {pid})")
+    else:
+        print(f"❌ ПРИЛОЖЕНИЕ НЕ ЗАПУЩЕНО ИЛИ УПАЛО")
+        
+        print("\n" + "=" * 60)
+        print("ПОСЛЕДНИЕ ОШИБКИ ИЗ ЛОГОВ:")
+        print("=" * 60)
+        result = subprocess.run(f"{ADB} -s {device} logcat -d | findstr /i 'FATAL AndroidRuntime java.lang'", 
+                              shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        if result.stdout:
+            print(result.stdout[-2000:])
+    
+    log_file = f"app_logs_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+    with open(log_file, 'w', encoding='utf-8') as f:
+        f.write("=" * 60 + "\n")
+        f.write("ЛОГИ ПРИЛОЖЕНИЯ AlmightyRandom\n")
+        f.write("=" * 60 + "\n\n")
+        if result.stdout:
+            f.write(result.stdout)
+    print(f"\n📁 Логи сохранены в файл: {log_file}")
 
+def full_update(device):
+    """Полное обновление проекта (с очисткой)"""
+    print("\n" + "=" * 50)
+    print("🔄 ПОЛНОЕ ОБНОВЛЕНИЕ (С ОЧИСТКОЙ)")
+    print("=" * 50)
+    print("⚠️ ВНИМАНИЕ: Это удалит ВСЕ файлы приложения, включая assets!")
+    print("   После этого приложение может перестать работать,")
+    print("   если у вас нет полной копии всех необходимых файлов.")
+    print("=" * 50)
+    
+    confirm = input("\nВы уверены, что хотите продолжить? (yes/no): ")
+    if confirm.lower() != 'yes':
+        print("❌ Отменено")
+        return False
+    
+    print("\n🚀 Начинаю обновление...\n")
+    
+    print("⏹️ Останавливаем приложение...")
+    subprocess.run(f"{ADB} -s {device} shell am force-stop {PACKAGE}", shell=True)
+    time.sleep(1)
+    
+    print("🗑️ Очищаем старые файлы...")
+    folders = ["screens", "components", "locales", "assets"]
+    for folder in folders:
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} rm -rf {APP_DIR}/{folder}"', shell=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} mkdir -p {APP_DIR}/{folder}"', shell=True)
+        print(f"   ✅ {folder}")
+    
+    if os.path.exists("main.py"):
+        print("\n📄 main.py")
+        subprocess.run(f"{ADB} -s {device} push main.py /data/local/tmp/", shell=True, capture_output=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/main.py {APP_DIR}/"', shell=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {APP_DIR}/main.py"', shell=True)
+    
+    if os.path.exists("screens"):
+        sync_directory("screens", f"{APP_DIR}/screens", device)
+    
+    if os.path.exists("components"):
+        sync_directory("components", f"{APP_DIR}/components", device)
+    
+    if os.path.exists("locales"):
+        sync_directory("locales", f"{APP_DIR}/locales", device)
+    
+    if os.path.exists("assets"):
+        sync_directory("assets", f"{APP_DIR}/assets", device)
+    
+    print("\n🧹 Очищаем кэш...")
+    subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} rm -rf {APP_DIR}/__pycache__"', shell=True)
+    subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} find {APP_DIR} -name *.pyc -delete"', shell=True)
+    
+    check_assets(device)
+    show_app_logs(device)
+    
+    print("\n" + "=" * 50)
+    print("✅ ОБНОВЛЕНИЕ ЗАВЕРШЕНО")
+    print("=" * 50)
+    
+    return True
 
-if __name__ == "__main__":
-    main()
+def get_all_files():
+    """Собирает все файлы для отслеживания"""
+    files = []
+    
+    if os.path.exists("main.py"):
+        files.append("main.py")
+    
+    if os.path.exists("screens"):
+        for f in os.listdir("screens"):
+            if f.endswith(".py") and f != "__init__.py":
+                files.append(f"screens/{f}")
+    
+    if os.path.exists("components"):
+        for f in os.listdir("components"):
+            if f.endswith(".py") and f != "__init__.py":
+                files.append(f"components/{f}")
+    
+    if os.path.exists("locales"):
+        for f in os.listdir("locales"):
+            if f.endswith(".json"):
+                files.append(f"locales/{f}")
+    
+    if os.path.exists("assets"):
+        for root, dirs, files_list in os.walk("assets"):
+            for f in files_list:
+                if not f.endswith(('.pyc', '.pyo', '.DS_Store')):
+                    full_path = os.path.join(root, f)
+                    files.append(full_path.replace("\\", "/"))
+    
+    return files
+
+def main_menu(device):
+    """Главное меню"""
+    print("\n" + "=" * 50)
+    print(f"📱 УСТРОЙСТВО: {device}")
+    print("=" * 50)
+    print(" 1. Обычный режим (отслеживание изменений)")
+    print(" 2. Полное обновление (ОПАСНО - удаляет всё!)")
+    print(" 3. Выборочная синхронизация папок (БЕЗОПАСНО - только обновление)")
+    print(" 4. Копировать файл(ы) в assets (БЕЗОПАСНО - только добавление)")
+    print(" 5. Проверить assets")
+    print(" 6. Посмотреть логи приложения")
+    print(" 7. Сменить устройство")
+    print(" 0. Выход")
+    print("=" * 50)
+    
+    while True:
+        try:
+            choice = input("\n👉 Выберите режим: ")
+            choice = int(choice)
+            
+            if choice == 0:
+                return False
+            elif choice == 1:
+                return "normal"
+            elif choice == 2:
+                full_update(device)
+                return "restart"
+            elif choice == 3:
+                sync_selected_folders(device)
+                return "restart"
+            elif choice == 4:
+                print("\n" + "=" * 50)
+                print(" 1. Скопировать один файл")
+                print(" 2. Скопировать несколько файлов")
+                print(" 0. Назад")
+                print("=" * 50)
+                
+                sub_choice = input("\n👉 Выберите действие: ")
+                if sub_choice == '1':
+                    copy_single_file_to_assets(device)
+                elif sub_choice == '2':
+                    copy_multiple_files_to_assets(device)
+            elif choice == 5:
+                check_assets(device)
+            elif choice == 6:
+                show_app_logs(device)
+            elif choice == 7:
+                return "change_device"
+            else:
+                print("❌ Неверный выбор")
+        except ValueError:
+            print("❌ Введите число")
+        except KeyboardInterrupt:
+            return False
+
+# ==================== ГЛАВНАЯ ПРОГРАММА ====================
+
+print("=" * 50)
+print("🚀 СИНХРОНИЗАЦИЯ ПРОЕКТА")
+print("=" * 50)
+
+try:
+    subprocess.run(f"{ADB} version", shell=True, capture_output=True, check=True)
+except:
+    print("❌ ADB не найден!")
+    input("Нажмите Enter для выхода...")
+    exit(1)
+
+while True:
+    selected_device = load_selected_device()
+    
+    if selected_device:
+        devices = get_adb_devices()
+        if selected_device not in devices:
+            print(f"⚠️ Устройство {selected_device} не найдено")
+            selected_device = None
+    
+    if not selected_device:
+        selected_device = select_device()
+        if not selected_device:
+            exit(0)
+    
+    mode = main_menu(selected_device)
+    
+    if mode == "normal":
+        break
+    elif mode == "change_device":
+        if os.path.exists(DEVICE_STATE_FILE):
+            os.remove(DEVICE_STATE_FILE)
+        continue
+    elif mode == "restart":
+        continue
+    else:
+        exit(0)
+
+print(f"\n📱 Работа с устройством: {selected_device}")
+print("=" * 50)
+print("👀 ОТСЛЕЖИВАНИЕ ИЗМЕНЕНИЙ")
+print("=" * 50)
+print("Сохраняйте файлы (Ctrl+S) для синхронизации")
+print("Нажмите Ctrl+C для выхода")
+print("=" * 50)
+
+state = load_state()
+files_to_watch = get_all_files()
+
+print(f"\nОтслеживается {len(files_to_watch)} файлов")
+
+for file in files_to_watch:
+    if file not in state:
+        state[file] = 0
+
+save_state(state)
+
+try:
+    while True:
+        changed = False
+        for file in files_to_watch:
+            if os.path.exists(file):
+                mtime = os.path.getmtime(file)
+                if mtime != state.get(file, 0):
+                    state[file] = mtime
+                    changed = True
+                    print(f"\n📝 {file}")
+                    sync_file(file, selected_device)
+                    save_state(state)
+        
+        if not changed:
+            time.sleep(1)
+except KeyboardInterrupt:
+    print("\n\n👋 Завершение...")
+    save_state(state)

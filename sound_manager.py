@@ -108,10 +108,9 @@ class SoundManager:
     def mute(self):
         """Выключить звук и вибрацию"""
         self._is_muted = True
-        self._is_vibration_enabled = False  # ← ВЫКЛЮЧАЕМ ВИБРАЦИЮ
+        self._is_vibration_enabled = False
         if self._sound:
             self._sound.volume = 0.0
-            # Останавливаем воспроизведение, чтобы не тратить ресурсы
             if self._sound.state == 'play':
                 self._sound.stop()
                 print("🔊 [SoundManager] Воспроизведение остановлено при mute")
@@ -120,10 +119,9 @@ class SoundManager:
     def unmute(self):
         """Включить звук и вибрацию"""
         self._is_muted = False
-        self._is_vibration_enabled = True  # ← ВКЛЮЧАЕМ ВИБРАЦИЮ
+        self._is_vibration_enabled = True
         if self._sound:
             self._sound.volume = self._current_volume
-            # Запускаем музыку, если она не играет
             if self._sound.state != 'play':
                 self._sound.play()
                 print("🔊 [SoundManager] Воспроизведение запущено при unmute")
@@ -140,14 +138,10 @@ class SoundManager:
         return self._sound and self._sound.state == 'play'
 
     def fade_to(self, target_volume, duration=1.0, callback=None):
-        """
-        Плавно изменяет громкость до target_volume за duration секунд.
-        Если звук выключен (muted), то не меняет громкость, но запоминает target_volume.
-        """
+        """Плавно изменяет громкость до target_volume за duration секунд."""
         self._target_volume = target_volume
         print(f"🔊 [SoundManager] fade_to({target_volume}, {duration}) - is_muted={self._is_muted}")
 
-        # Если звук выключен - не выполняем fade
         if self._is_muted:
             print(f"🔊 [SoundManager] fade_to пропущен - звук выключен")
             if callback:
@@ -160,7 +154,6 @@ class SoundManager:
                 callback()
             return
 
-        # Отменяем предыдущую fade анимацию
         if self._fade_clock:
             self._fade_clock.cancel()
             self._fade_clock = None
@@ -181,7 +174,7 @@ class SoundManager:
                 if self._sound and not self._is_muted:
                     self._sound.volume = target_volume
                 self._fade_clock = None
-                print(f"🔊 [SoundManager] fade_to завершен, финальная гр омкость={self._sound.volume if self._sound else 'None'}")
+                print(f"🔊 [SoundManager] fade_to завершен, финальная громкость={self._sound.volume if self._sound else 'None'}")
                 if callback:
                     callback()
 
@@ -203,29 +196,15 @@ class SoundManager:
         return self._is_vibration_enabled
 
     def vibrate(self, duration=0.05):
-        """
-        Воспроизводит вибрацию на Android
-        duration - длительность в секундах (по умолчанию 0.05 = 50 мс)
-        """
-        # Вибрация следует за состоянием звука
-        if self._is_muted:
-            print(f"📳 [SoundManager] Вибрация пропущена - звук выключен")
+        """Воспроизводит вибрацию на Android"""
+        if self._is_muted or not self._is_vibration_enabled:
             return
-
-        if not self._is_vibration_enabled:
-            print(f"📳 [SoundManager] Вибрация пропущена - выключена в настройках")
-            return
-
         if platform == 'android' and self._vibrator is not None:
             try:
                 self._vibrator.vibrate(int(duration * 1000))
                 print(f"📳 [SoundManager] Вибрация {duration}с")
             except Exception as e:
                 print(f"⚠️ [SoundManager] Ошибка вибрации: {e}")
-        else:
-            # На ПК просто выводим сообщение для отладки
-            if platform != 'android':
-                print(f"📳 [SoundManager] Вибрация (ПК-отладка): {duration}с")
 
     def vibrate_short(self):
         """Короткая вибрация (30 мс)"""
@@ -240,40 +219,69 @@ class SoundManager:
         self.vibrate(0.12)
 
     def vibrate_pattern(self, pattern=None, repeat=-1):
-        """
-        Вибрация с паттерном
-        pattern - список длительностей в секундах (например [0.1, 0.05, 0.1, 0.05])
-        repeat - количество повторений (-1 = бесконечно, 0 = один раз)
-        """
-        if self._is_muted:
-            print(f"📳 [SoundManager] Вибрация с паттерном пропущена - звук выключен")
+        """Вибрация с паттерном"""
+        if self._is_muted or not self._is_vibration_enabled:
             return
-
-        if not self._is_vibration_enabled:
-            print(f"📳 [SoundManager] Вибрация с паттерном пропущена - вибрация выключена")
-            return
-
         if platform == 'android' and self._vibrator is not None:
             try:
                 if pattern:
-                    # Конвертируем секунды в миллисекунды
                     pattern_ms = [int(p * 1000) for p in pattern]
                     self._vibrator.vibrate(pattern_ms, repeat)
                     print(f"📳 [SoundManager] Вибрация с паттерном: {pattern}")
             except Exception as e:
                 print(f"⚠️ [SoundManager] Ошибка вибрации с паттерном: {e}")
 
-    def vibrate_success(self):
-        """Вибрация при успешном действии (двойная короткая)"""
-        self.vibrate_pattern([0.05, 0.05, 0.05], 0)
+    # ==================== МЕТОДЫ ДЛЯ ИГРЫ ====================
 
-    def vibrate_error(self):
-        """Вибрация при ошибке (длинная)"""
-        self.vibrate_long()
+    def vibrate_glass_raise(self):
+        """Вибрация при поднятии стакана (короткая, однократная)"""
+        if self._is_muted or not self._is_vibration_enabled:
+            return
+        # Однократная вибрация (repeat=0), а не бесконечная (repeat=-1)
+        self.vibrate_pattern([0.03, 0.02, 0.03], 0)
+        print("📳 [SoundManager] Вибрация при поднятии стакана")
 
-    def vibrate_selection(self):
-        """Вибрация при выборе элемента"""
+    def vibrate_glass_lower(self):
+        """Вибрация при опускании стакана"""
+        if self._is_muted or not self._is_vibration_enabled:
+            return
         self.vibrate_short()
+        print("📳 [SoundManager] Вибрация при опускании стакана")
+
+    def vibrate_full_charge(self):
+        """Вибрация при достижении 100% заряда"""
+        if self._is_muted or not self._is_vibration_enabled:
+            return
+        self.vibrate_pattern([0.05, 0.03, 0.08, 0.03, 0.1], 0)
+        print("📳 [SoundManager] Вибрация при достижении 100% заряда")
+
+    def vibrate_dice_switch(self):
+        """Вибрация при анимации перехода кубиков (1<->2)"""
+        if self._is_muted or not self._is_vibration_enabled:
+            return
+        self.vibrate_medium()
+        print("📳 [SoundManager] Вибрация при переходе кубиков")
+
+    def vibrate_dice_appear(self):
+        """Вибрация при появлении кубиков"""
+        if self._is_muted or not self._is_vibration_enabled:
+            return
+        self.vibrate_pattern([0.02, 0.02, 0.03], 0)
+        print("📳 [SoundManager] Вибрация при появлении кубиков")
+
+    def vibrate_dice_disappear(self):
+        """Вибрация при исчезновении кубиков"""
+        if self._is_muted or not self._is_vibration_enabled:
+            return
+        self.vibrate_short()
+        print("📳 [SoundManager] Вибрация при исчезновении кубиков")
+
+    def vibrate_dice_roll(self):
+        """Вибрация при броске кубиков"""
+        if self._is_muted or not self._is_vibration_enabled:
+            return
+        self.vibrate_pattern([0.02, 0.02, 0.02, 0.02, 0.02], 0)
+        print("📳 [SoundManager] Вибрация при броске кубиков")
 
     def cancel_vibration(self):
         """Отменить текущую вибрацию"""

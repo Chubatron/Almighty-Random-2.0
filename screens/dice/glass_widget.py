@@ -13,8 +13,6 @@ from kivy.graphics.texture import Texture
 from kivy.core.window import Window
 from kivy.utils import platform
 
-DEBUG_MODE = False
-
 
 class GlassWidget(Widget):
     """Виджет стакана со своим спрайт-листом (2 ряда × 12 колонок)"""
@@ -26,10 +24,13 @@ class GlassWidget(Widget):
     frame_index = NumericProperty(0)
     rotation_angle = NumericProperty(-90)
     is_raised = BooleanProperty(False)
+    touch_zone_scale_x = NumericProperty(1.5)  # Коэффициент увеличения зоны нажатия по горизонтали
+    touch_zone_scale_y = NumericProperty(2)  # Коэффициент увеличения зоны нажатия по вертикали
 
     _texture = ObjectProperty(None, allownone=True)
 
-    def __init__(self, **kwargs):
+    def __init__(self, debug_mode=False, **kwargs):
+        self.debug_mode = debug_mode
         self.initial_glass_size = kwargs.pop('glass_size', None)
         self.on_glass_click = kwargs.pop('on_glass_click', None)
         self.on_glass_drag = kwargs.pop('on_glass_drag', None)
@@ -54,6 +55,25 @@ class GlassWidget(Widget):
             size=self._update_display,
             rotation_angle=self._update_display
         )
+
+    def collide_point(self, x, y):
+        """Увеличивает зону нажатия на стакан с разными коэффициентами по горизонтали и вертикали"""
+        # Получаем центр виджета
+        center_x = self.center_x
+        center_y = self.center_y
+
+        # Вычисляем увеличенную зону с разными коэффициентами
+        width = self.width * self.touch_zone_scale_x
+        height = self.height * self.touch_zone_scale_y
+
+        # Вычисляем границы увеличенной зоны
+        left = center_x - width / 2
+        bottom = center_y - height / 2
+        right = left + width
+        top = bottom + height
+
+        # Проверяем, попала ли точка в увеличенную зону
+        return left <= x <= right and bottom <= y <= top
 
     def _load_spritesheet(self, path):
         try:
@@ -117,11 +137,23 @@ class GlassWidget(Widget):
             Rectangle(pos=self.pos, size=self.size, texture=self._texture, tex_coords=tex_coords)
             PopMatrix()
 
-        if DEBUG_MODE:
+        # Рисуем отладочные квадраты ТОЛЬКО если debug_mode = True
+        if self.debug_mode:
             self.canvas.after.clear()
             with self.canvas.after:
+                # Рисуем оригинальную зону (зеленый контур)
                 Color(0, 1, 0, 0.8)
                 Line(rectangle=(self.x, self.y, self.width, self.height), width=2)
+
+                # Рисуем увеличенную зону нажатия (красный контур)
+                center_x = self.center_x
+                center_y = self.center_y
+                width = self.width * self.touch_zone_scale_x
+                height = self.height * self.touch_zone_scale_y
+                left = center_x - width / 2
+                bottom = center_y - height / 2
+                Color(1, 0, 0, 0.5)
+                Line(rectangle=(left, bottom, width, height), width=2)
 
     def set_frame(self, frame_index):
         total_frames = self.rows * self.cols
@@ -176,7 +208,7 @@ class GlassWidget(Widget):
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos) and not self.is_animating:
             if self.parent and hasattr(self.parent, 'is_glass_blocked') and self.parent.is_glass_blocked:
-                if DEBUG_MODE:
+                if self.debug_mode:
                     print("🔒 [WIDGET] Стакан заблокирован, клик игнорируется")
                 return True
 
@@ -184,7 +216,7 @@ class GlassWidget(Widget):
             self.has_moved_during_drag = False
             self.touch_start_pos = (touch.x, touch.y)
             self.touch_start_time = Clock.get_time()
-            if DEBUG_MODE:
+            if self.debug_mode:
                 print(f"🟢 [WIDGET] on_touch_down: начали перетаскивание, pos={self.touch_start_pos}")
             return True
         return super().on_touch_down(touch)
@@ -192,7 +224,7 @@ class GlassWidget(Widget):
     def on_touch_move(self, touch):
         if self.drag_active:
             if self.parent and hasattr(self.parent, 'is_glass_blocked') and self.parent.is_glass_blocked:
-                if DEBUG_MODE:
+                if self.debug_mode:
                     print("🔒 [WIDGET] Стакан заблокирован, движение игнорируется")
                 return True
 
@@ -202,7 +234,7 @@ class GlassWidget(Widget):
 
                 if abs(delta_x) > 5 or abs(delta_y) > 5:
                     self.has_moved_during_drag = True
-                    if DEBUG_MODE:
+                    if self.debug_mode:
                         print(f"🟡 [WIDGET] on_touch_move: delta=({delta_x:.1f}, {delta_y:.1f})")
                     if self.on_glass_drag:
                         self.on_glass_drag(delta_x, delta_y, touch)
@@ -211,11 +243,11 @@ class GlassWidget(Widget):
         return super().on_touch_move(touch)
 
     def on_touch_up(self, touch):
-        if DEBUG_MODE:
+        if self.debug_mode:
             print(f"🟢 [WIDGET] on_touch_up: drag_active={self.drag_active}, has_moved={self.has_moved_during_drag}")
         if self.drag_active:
             if self.parent and hasattr(self.parent, 'is_glass_blocked') and self.parent.is_glass_blocked:
-                if DEBUG_MODE:
+                if self.debug_mode:
                     print("🔒 [WIDGET] Стакан заблокирован, клик игнорируется")
                 self.drag_active = False
                 self.has_moved_during_drag = False
@@ -226,11 +258,11 @@ class GlassWidget(Widget):
             touch_duration = Clock.get_time() - self.touch_start_time
 
             if not self.has_moved_during_drag and touch_duration < 0.3 and self.on_glass_click:
-                if DEBUG_MODE:
+                if self.debug_mode:
                     print(f"   👆 Это клик")
                 self.on_glass_click()
             elif self.has_moved_during_drag and self.on_glass_drag_end:
-                if DEBUG_MODE:
+                if self.debug_mode:
                     print(f"   ✋ Это окончание перетаскивания")
                 self.on_glass_drag_end(touch)
 
