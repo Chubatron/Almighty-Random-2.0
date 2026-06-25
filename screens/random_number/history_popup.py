@@ -15,6 +15,8 @@ from kivy.uix.relativelayout import RelativeLayout
 import os
 import re
 
+from sound_manager import SoundManager
+
 # History file
 HISTORY_FILE = 'random_numbers_history.txt'
 
@@ -91,6 +93,7 @@ class ImageButton(ButtonBehavior, RelativeLayout):
         self.add_widget(self.debug_overlay)
 
         self.button_name = text
+        self._sound_manager = SoundManager()
 
     def _update_debug_overlay(self, *args):
         if hasattr(self, 'debug_bg'):
@@ -145,31 +148,40 @@ class DebugPopup(Popup):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._debug_info_printed = False
+        self._sound_manager = SoundManager()
+
+        # Загружаем звук для кнопок CLEAR и CLOSE
         self._click_sound = None
         self._load_click_sound()
-        self._debug_info_printed = False
 
     def _load_click_sound(self):
-        """Загружает звук нажатия кнопки"""
+        """Загружает звук нажатия кнопки - set_value2.mp3"""
         try:
             from kivy.core.audio import SoundLoader
-            sound_path = 'assets/sounds/Schpun.ogg'
+            sound_path = 'assets/sounds/r_number/set_value2.mp3'
             if os.path.exists(sound_path):
                 self._click_sound = SoundLoader.load(sound_path)
                 if self._click_sound:
                     self._click_sound.volume = 0.6
-        except Exception:
-            pass
+                    print(f"[SOUND] Загружен звук для кнопок CLEAR/CLOSE: {sound_path}")
+            else:
+                print(f"[SOUND] Файл не найден: {sound_path}")
+        except Exception as e:
+            print(f"[SOUND] Ошибка загрузки звука: {e}")
 
     def play_click_sound(self):
-        """Воспроизводит звук нажатия кнопки"""
+        """Воспроизводит звук нажатия кнопки (проверяет mute)"""
+        if self._sound_manager.is_muted():
+            return
         if self._click_sound:
             try:
                 if self._click_sound.state == 'play':
                     self._click_sound.stop()
                 self._click_sound.play()
-            except Exception:
-                pass
+                print(f"[SOUND] Воспроизведен звук для CLEAR/CLOSE")
+            except Exception as e:
+                print(f"[SOUND] Ошибка воспроизведения звука: {e}")
 
     def print_zone_info(self, button_name, min_x, min_y, max_x, max_y, touch_x, touch_y, hit):
         """Выводит подробную информацию о зоне и касании"""
@@ -239,7 +251,6 @@ class DebugPopup(Popup):
 
                 if hit:
                     print(f"✅ [ACTION] CLEAR: ПОПАДАНИЕ! ВЫЗЫВАЮ clear_history()")
-                    self.play_click_sound()
                     if hasattr(self.clear_btn, 'debug_color'):
                         self.clear_btn.debug_color.rgba = (0, 1, 1, 0.0)
                     self.clear_history(self.clear_btn)
@@ -257,7 +268,6 @@ class DebugPopup(Popup):
 
                 if hit:
                     print(f"✅ [ACTION] CLOSE: ПОПАДАНИЕ! ВЫЗЫВАЮ on_close_press()")
-                    self.play_click_sound()
                     if hasattr(self.close_btn, 'debug_color'):
                         self.close_btn.debug_color.rgba = (0, 1, 1, 0)
                     self.on_close_press(self.close_btn)
@@ -301,6 +311,7 @@ class RotatedButton(Button):
         self.debug_overlay.bind(size=self._update_debug_rect, pos=self._update_debug_rect)
 
         self.add_widget(self.debug_overlay)
+        self._sound_manager = SoundManager()
 
     def _update_debug_overlay(self, *args):
         if hasattr(self, 'debug_bg'):
@@ -506,10 +517,16 @@ class HistoryPopup(DebugPopup):
 
     def on_close_press(self, instance):
         print(f"[DEBUG HISTORY] НАЖАТА КНОПКА CLOSE - ЗАКРЫВАЮ POPUP")
+        # Воспроизводим звук (проверяет mute внутри)
+        self.play_click_sound()
+        # Закрываем попап
         self.dismiss()
 
     def clear_history(self, instance):
         print(f"[DEBUG HISTORY] НАЖАТА КНОПКА CLEAR - ВЫПОЛНЯЮ ОЧИСТКУ")
+        # Воспроизводим звук (проверяет mute внутри)
+        self.play_click_sound()
+
         try:
             if os.path.exists(HISTORY_FILE):
                 os.remove(HISTORY_FILE)

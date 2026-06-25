@@ -11,6 +11,8 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 import os
 
+from sound_manager import SoundManager
+
 # Глобальная переменная для хранения позиции Scatter
 SCATTER_POSITION = None
 
@@ -30,6 +32,7 @@ class ImageButton(Button):
 
         # Загружаем звук нажатия
         self._click_sound = None
+        self._sound_manager = SoundManager()
         self._load_click_sound()
 
         self.bg_image = Image(
@@ -59,7 +62,7 @@ class ImageButton(Button):
         """Загружает звук нажатия кнопки"""
         try:
             from kivy.core.audio import SoundLoader
-            sound_path = 'assets/sounds/Schpun.ogg'
+            sound_path = 'assets/sounds/r_number/set_value.mp3'
             if os.path.exists(sound_path):
                 self._click_sound = SoundLoader.load(sound_path)
                 if self._click_sound:
@@ -68,7 +71,9 @@ class ImageButton(Button):
             pass
 
     def play_click_sound(self):
-        """Воспроизводит звук нажатия кнопки"""
+        """Воспроизводит звук нажатия кнопки (проверяет mute)"""
+        if self._sound_manager.is_muted():
+            return
         if self._click_sound:
             try:
                 if self._click_sound.state == 'play':
@@ -102,6 +107,7 @@ class RotatedPopup(ModalView):
         self.auto_dismiss = True
         self.on_submit = on_submit
         self._initialized = False
+        self._sound_manager = SoundManager()
 
         with self.canvas.before:
             Color(0.2, 0.2, 0.2, 0.95)

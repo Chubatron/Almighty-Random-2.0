@@ -14,6 +14,7 @@ from kivy.uix.widget import Widget
 from kivy.core.image import Image as CoreImage
 from kivy.uix.popup import Popup
 from kivy.uix.boxlayout import BoxLayout
+from kivy.graphics import Color, Rectangle
 import os
 import json
 import random
@@ -22,9 +23,10 @@ from datetime import datetime
 from screens.base_game_screen import BaseGameScreen
 from screens.random_number.modal_number_input import SimpleNumberInputPopup, CustomModal
 from screens.random_number.history_popup import HistoryPopup, set_random_number_screen
+from sound_manager import SoundManager
 
 # Debug mode
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 # History file
 HISTORY_FILE = 'random_numbers_history.txt'
@@ -113,12 +115,28 @@ class AdaptiveBackground(Image):
         self.pos_hint = {'x': 0, 'y': 0}
 
 
+class SemiTransparentBackground(Widget):
+    """Полупрозрачный фон для кнопок управления"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        with self.canvas.before:
+            Color(0, 0, 0, 0.1)  # Черный с прозрачностью 10%
+            self.bg_rect = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self._update_bg, size=self._update_bg)
+
+    def _update_bg(self, *args):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+
+
 class ImageButton(ButtonBehavior, KivyImage):
     """Button with image"""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._click_sound = None
+        self._sound_manager = SoundManager()
         self._load_click_sound()
 
     def _load_click_sound(self):
@@ -134,7 +152,9 @@ class ImageButton(ButtonBehavior, KivyImage):
             pass
 
     def play_click_sound(self):
-        """Воспроизводит звук нажатия кнопки"""
+        """Воспроизводит звук нажатия кнопки (проверяет mute)"""
+        if self._sound_manager.is_muted():
+            return
         if self._click_sound:
             try:
                 if self._click_sound.state == 'play':
@@ -150,7 +170,11 @@ class ImageButton(ButtonBehavior, KivyImage):
 
 
 class SpriteSheetButton(ButtonBehavior, Widget):
-    """Button with image from spritesheet"""
+    """Button with image from spritesheet - НЕ РЕАГИРУЕТ НА НАЖАТИЯ"""
+
+    # Коэффициенты для размера виджета относительно экрана
+    WIDGET_WIDTH_COEFF = 0.33
+    WIDGET_HEIGHT_COEFF = 0.068
 
     def __init__(self, button_index=0, sprite_sheet_path='assets/sprites/numbers_spritesheet.png', **kwargs):
         super().__init__(**kwargs)
@@ -163,35 +187,37 @@ class SpriteSheetButton(ButtonBehavior, Widget):
         self.rows = 10
         self.cols = 12
         self.is_animating = False
-        self.frame_width = 140
-        self.frame_height = 54
+        self.frame_width = 140  # Фиксированный размер кадра из спрайтлиста
+        self.frame_height = 54  # Фиксированный размер кадра из спрайтлиста
         self._is_spinning = False
-        self._click_sound = None
+        self.debug_border = None
 
-        Clock.schedule_once(lambda dt: self._load_click_sound(), 0.1)
+        # Устанавливаем размер виджета относительно экрана
+        screen_width = Window.width
+        screen_height = Window.height
+        self.size_hint = (None, None)
+        self.width = screen_width * self.WIDGET_WIDTH_COEFF
+        self.height = screen_height * self.WIDGET_HEIGHT_COEFF
+
         Clock.schedule_once(lambda dt: self._load_sprite(0), 0.1)
+        Clock.schedule_once(lambda dt: self._add_debug_border(), 0.2)
 
-    def _load_click_sound(self):
-        """Загружает звук нажатия кнопки"""
-        try:
-            from kivy.core.audio import SoundLoader
-            sound_path = 'assets/sounds/Schpun.ogg'
-            if os.path.exists(sound_path):
-                self._click_sound = SoundLoader.load(sound_path)
-                if self._click_sound:
-                    self._click_sound.volume = 0.6
-        except Exception:
-            pass
+    def _add_debug_border(self):
+        """Добавляет отладочную рамку вокруг кнопки"""
+        if DEBUG_MODE:
+            with self.canvas.after:
+                Color(1, 0, 0, 0.8)  # Красная рамка
+                self.debug_border = Line(
+                    rectangle=(self.x, self.y, self.width, self.height),
+                    width=1
+                )
+            self.bind(pos=self._update_debug_border, size=self._update_debug_border)
+            print(f"[DEBUG] Добавлена рамка для кнопки {self.button_index + 1}")
 
-    def play_click_sound(self):
-        """Воспроизводит звук нажатия кнопки"""
-        if self._click_sound:
-            try:
-                if self._click_sound.state == 'play':
-                    self._click_sound.stop()
-                self._click_sound.play()
-            except Exception:
-                pass
+    def _update_debug_border(self, *args):
+        """Обновляет позицию рамки"""
+        if self.debug_border:
+            self.debug_border.rectangle = (self.x, self.y, self.width, self.height)
 
     def _load_sprite(self, frame_index):
         try:
@@ -271,16 +297,14 @@ class SpriteSheetButton(ButtonBehavior, Widget):
         if self.sprite_image:
             self.sprite_image.size = (self.width, self.height)
 
+    # ===== ЗАГЛУШКА - кнопка НЕ РЕАГИРУЕТ на нажатия =====
     def on_press(self):
-        if self.sprite_image and not self.disabled:
-            Animation(opacity=0.7, duration=0.05).start(self.sprite_image)
-        self.play_click_sound()
-        super().on_press()
+        """Заглушка - кнопка не реагирует на нажатие"""
+        pass  # Ничего не делаем
 
     def on_release(self):
-        if self.sprite_image and not self.disabled:
-            Animation(opacity=1.0, duration=0.05).start(self.sprite_image)
-        super().on_release()
+        """Заглушка - кнопка не реагирует на отпускание"""
+        pass  # Ничего не делаем
 
 
 class NeonButton(ButtonBehavior, KivyImage):
@@ -297,6 +321,7 @@ class NeonButton(ButtonBehavior, KivyImage):
         self.allow_stretch = True
         self.keep_ratio = False
         self._click_sound = None
+        self._sound_manager = SoundManager()
 
         Clock.schedule_once(self._load_click_sound, 0.1)
         Clock.schedule_once(self._create_label, 0.2)
@@ -314,7 +339,9 @@ class NeonButton(ButtonBehavior, KivyImage):
             pass
 
     def play_click_sound(self):
-        """Воспроизводит звук нажатия кнопки"""
+        """Воспроизводит звук нажатия кнопки (проверяет mute)"""
+        if self._sound_manager.is_muted():
+            return
         if self._click_sound:
             try:
                 if self._click_sound.state == 'play':
@@ -418,6 +445,8 @@ class RandomNumberScreen(BaseGameScreen):
         self.neon_buttons = []
         self.sprite_buttons = []
         self.buttons_created = False
+        self.semi_transparent_bg = None  # Полупрозрачный фон
+        self._sound_manager = SoundManager()
 
         # Загружаем MIN/MAX из глобального состояния
         global _range_state
@@ -436,6 +465,9 @@ class RandomNumberScreen(BaseGameScreen):
 
         # Флаг блокировки кнопок во время анимации
         self.is_animating = False
+
+        # Звук машины
+        self.machine_sound = None
 
         # Регистрируем себя для сброса счётчика из HistoryPopup
         set_random_number_screen(self)
@@ -561,8 +593,9 @@ class RandomNumberScreen(BaseGameScreen):
 
         if not self.buttons_created:
             self.create_back_button()
-            self.create_neon_buttons()
-            self.create_sprite_buttons()
+            self.create_sprite_buttons()  # Сначала создаем спрайтовые кнопки (они будут снизу)
+            self.create_semi_transparent_background()  # Затем полупрозрачный фон (поверх спрайтов)
+            self.create_neon_buttons()  # Затем кнопки управления (поверх фона)
             self.buttons_created = True
         else:
             self.update_min_max_buttons()
@@ -571,6 +604,9 @@ class RandomNumberScreen(BaseGameScreen):
         """Вызывается при выходе с экрана"""
         # Вызываем родительский on_leave для обработки звука
         super().on_leave()
+
+        # Останавливаем звук машины если он играет
+        self.stop_machine_sound()
 
         self._save_range()
         for button in self.neon_buttons:
@@ -599,17 +635,39 @@ class RandomNumberScreen(BaseGameScreen):
         self.back_button = back_btn
         self.layout.add_widget(back_btn)
 
+    def create_semi_transparent_background(self):
+        """Создает полупрозрачный фон для кнопок управления"""
+        if self.semi_transparent_bg:
+            self.layout.remove_widget(self.semi_transparent_bg)
+
+        # Определяем область для фона - левая часть экрана (где кнопки LIST, MIN, MAX, GENERATE)
+        screen_width = Window.width
+        screen_height = Window.height
+
+        # Фон занимает левую часть экрана (0-0.45 ширины) и всю высоту
+        self.semi_transparent_bg = SemiTransparentBackground(
+            size_hint=(None, None),
+            size=(screen_width, screen_height),
+            pos=(0, 0)
+        )
+        self.layout.add_widget(self.semi_transparent_bg)
+
     def create_sprite_buttons(self):
         sprite_sheet_path = 'assets/sprites/numbers_spritesheet.png'
         berry_sprite_sheet_path = 'assets/sprites/berry_spritesheet.png'
 
         button_positions = [
-            {'x': 0.52, 'y': 0.915}, {'x': 0.52, 'y': 0.815}, {'x': 0.52, 'y': 0.72},
-            {'x': 0.52, 'y': 0.62}, {'x': 0.52, 'y': 0.52}, {'x': 0.52, 'y': 0.42},
-            {'x': 0.52, 'y': 0.32}, {'x': 0.52, 'y': 0.225}, {'x': 0.52, 'y': 0.125},
-            {'x': 0.52, 'y': 0.025}
+            {'x': 0.5, 'y': 0.91},
+            {'x': 0.5, 'y': 0.812},
+            {'x': 0.5, 'y': 0.715},
+            {'x': 0.5, 'y': 0.615},
+            {'x': 0.5, 'y': 0.517},
+            {'x': 0.5, 'y': 0.415},
+            {'x': 0.5, 'y': 0.318},
+            {'x': 0.5, 'y': 0.22},
+            {'x': 0.5, 'y': 0.12},
+            {'x': 0.5, 'y': 0.02}
         ]
-        button_size_hint = (0.28, 0.062)
 
         for i, pos in enumerate(button_positions):
             # Для первой кнопки (индекс 0) используем berry_spritesheet
@@ -617,27 +675,57 @@ class RandomNumberScreen(BaseGameScreen):
                 sprite_button = SpriteSheetButton(
                     button_index=i,
                     sprite_sheet_path=berry_sprite_sheet_path,
-                    size_hint=button_size_hint,
                     pos_hint={'x': pos['x'], 'y': pos['y']}
                 )
             else:
                 sprite_button = SpriteSheetButton(
                     button_index=i,
                     sprite_sheet_path=sprite_sheet_path,
-                    size_hint=button_size_hint,
                     pos_hint={'x': pos['x'], 'y': pos['y']}
                 )
 
             sprite_button.button_id = i
             sprite_button.button_number = i + 1
-            sprite_button.bind(on_press=self.on_sprite_button_press)
+            # НЕ ПРИВЯЗЫВАЕМ обработчик нажатия - кнопки не реагируют
+            # sprite_button.bind(on_press=self.on_sprite_button_press)
             self.layout.add_widget(sprite_button)
             self.sprite_buttons.append(sprite_button)
 
+            # Выводим информацию о созданной кнопке с рамкой
+            print(f"[DEBUG] Создана кнопка {i + 1} с рамкой в позиции: x={pos['x']}, y={pos['y']}")
+
     def on_sprite_button_press(self, instance):
-        if not self.is_animating:
-            # Звук воспроизводится в самом классе SpriteSheetButton
-            pass
+        # Этот метод больше не используется, так как кнопки не реагируют на нажатия
+        pass
+
+    def play_machine_sound(self):
+        """Воспроизводит звук работы механизма при анимации (один раз) - проверяет mute"""
+        if self._sound_manager.is_muted():
+            return
+        try:
+            from kivy.core.audio import SoundLoader
+            sound_path = 'assets/sounds/r_number/machine.mp3'
+            if os.path.exists(sound_path):
+                self.machine_sound = SoundLoader.load(sound_path)
+                if self.machine_sound:
+                    self.machine_sound.volume = 0.5
+                    # Без зацикливания - звук проиграется один раз
+                    self.machine_sound.play()
+                    print(f"[SOUND] Воспроизведен звук машины: {sound_path}")
+            else:
+                print(f"[SOUND] Файл не найден: {sound_path}")
+        except Exception as e:
+            print(f"[SOUND] Ошибка воспроизведения звука машины: {e}")
+
+    def stop_machine_sound(self):
+        """Останавливает звук машины"""
+        if hasattr(self, 'machine_sound') and self.machine_sound:
+            try:
+                if self.machine_sound.state == 'play':
+                    self.machine_sound.stop()
+                    print(f"[SOUND] Звук машины остановлен")
+            except Exception as e:
+                print(f"[SOUND] Ошибка остановки звука машины: {e}")
 
     def spin_all_buttons(self, target_rows, sign_row=None):
         """Запускает анимацию всех кнопок"""
@@ -648,6 +736,9 @@ class RandomNumberScreen(BaseGameScreen):
 
         self.is_animating = True
         self._set_neon_buttons_enabled(False)
+
+        # Воспроизводим звук машины (один раз) с задержкой
+        Clock.schedule_once(lambda dt: self.play_machine_sound(), 0.4)
 
         completed = [0]
         total_buttons = len(self.sprite_buttons)
@@ -662,6 +753,8 @@ class RandomNumberScreen(BaseGameScreen):
                 unlocked[0] = True
                 self.is_animating = False
                 self._set_neon_buttons_enabled(True)
+                # Останавливаем звук машины
+                self.stop_machine_sound()
 
         # Анимация для первой кнопки (знак)
         if sign_row is not None and total_buttons > 0:
@@ -704,6 +797,8 @@ class RandomNumberScreen(BaseGameScreen):
             unlocked[0] = True
             self.is_animating = False
             self._set_neon_buttons_enabled(True)
+            # Останавливаем звук машины при таймауте
+            self.stop_machine_sound()
 
     def get_digit_row(self, digit):
         return digit
@@ -787,6 +882,24 @@ class RandomNumberScreen(BaseGameScreen):
         if not self.is_animating:
             Animation(opacity=0.8, duration=0.05).start(instance)
 
+    def play_generate_sound(self):
+        """Воспроизводит специальный звук для кнопки GENERATE - проверяет mute"""
+        if self._sound_manager.is_muted():
+            return
+        try:
+            from kivy.core.audio import SoundLoader
+            sound_path = 'assets/sounds/r_number/lever.mp3'
+            if os.path.exists(sound_path):
+                sound = SoundLoader.load(sound_path)
+                if sound:
+                    sound.volume = 0.7
+                    sound.play()
+                    print(f"[SOUND] Воспроизведен звук GENERATE: {sound_path}")
+            else:
+                print(f"[SOUND] Файл не найден: {sound_path}")
+        except Exception as e:
+            print(f"[SOUND] Ошибка воспроизведения звука: {e}")
+
     def on_button_release(self, instance, action_id):
         if self.is_animating:
             print(f"[LOCKED] Кнопка {action_id} заблокирована во время анимации")
@@ -799,6 +912,9 @@ class RandomNumberScreen(BaseGameScreen):
         elif action_id == "max":
             self.show_number_input_popup("max", self.max_value)
         elif action_id == "generate":
+            # Воспроизводим специальный звук для GENERATE
+            self.play_generate_sound()
+
             print(f"\n[GENERATE] ===== НАЖАТА КНОПКА GENERATE =====")
             print(f"[GENERATE] Текущий MIN: {self.min_value}")
             print(f"[GENERATE] Текущий MAX: {self.max_value}")

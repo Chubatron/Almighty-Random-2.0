@@ -1,982 +1,882 @@
-# random_number_screen.py
+import os
+import random
 
 from kivy.uix.image import Image
-from kivy.animation import Animation
-from kivy.clock import Clock
 from kivy.uix.behaviors import ButtonBehavior
+from kivy.uix.floatlayout import FloatLayout
+from kivy.clock import Clock
+from kivy.animation import Animation
 from kivy.uix.image import Image as KivyImage
 from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
-from kivy.graphics import PushMatrix, PopMatrix, Rotate, Translate, Color, Rectangle, Line
-from kivy.core.window import Window
 from kivy.uix.modalview import ModalView
-from kivy.uix.widget import Widget
-from kivy.core.image import Image as CoreImage
-from kivy.uix.floatlayout import FloatLayout
-
+from kivy.graphics import Color, Line
+from kivy.vector import Vector
+from kivy.core.window import Window
+from kivy.core.audio import SoundLoader
+from sound_manager import SoundManager
 from screens.base_game_screen import BaseGameScreen
 
-# Режим отладки
-DEBUG_MODE = True
 
+class BulletSprite(KivyImage):
+    """Спрайт патрона в слоте барабана с поворотом и случайным изображением"""
 
-class AdaptiveBackground(Image):
-    """Адаптивный фон - растягивается на весь экран"""
-
-    def __init__(self, source='', **kwargs):
+    def __init__(self, slot_number=0, **kwargs):
         super().__init__(**kwargs)
-        self.source = source
+        self.slot_number = slot_number
+        # Выбираем случайное изображение от 0 до 5
+        random_index = random.randint(0, 10)
+        self.source = f'assets/images/guns/Bullet_back_{random_index}.png'
+        self.size_hint = (None, None)
+        self.size = (100, 100)
         self.allow_stretch = True
-        self.keep_ratio = False
-        self.size_hint = (1, 1)
-        self.pos_hint = {'x': 0, 'y': 0}
-
-
-class ImageButton(ButtonBehavior, KivyImage):
-    """Кнопка с изображением"""
-    pass
-
-
-class SpriteSheetButton(ButtonBehavior, Widget):
-    """Кнопка с изображением из спрайтлиста"""
-
-    def __init__(self, button_index=0, sprite_sheet_path='assets/sprites/numbers_spritesheet.png', **kwargs):
-        super().__init__(**kwargs)
-        self.button_index = button_index
-        self.sprite_sheet_path = sprite_sheet_path
-        self.sprite_image = None
-        self.sprite_texture_region = None
-        self.current_frame = 0
-        self.total_frames = 120  # 10 строк × 12 колонок
-        self.rows = 10
-        self.cols = 12
-        self.is_animating = False
-
-        # Размеры одного кадра в спрайтлисте
-        self.frame_width = 140
-        self.frame_height = 54
-
-        Clock.schedule_once(lambda dt: self._load_sprite(0), 0.1)
-
-    def _load_sprite(self, frame_index):
-        """Загружает конкретный кадр из спрайтлиста"""
-        try:
-            sprite_sheet = CoreImage(self.sprite_sheet_path)
-            texture_height = sprite_sheet.texture.height
-
-            # Вычисляем позицию кадра в спрайтлисте
-            row = frame_index // self.cols
-            col = frame_index % self.cols
-
-            # Вычисляем смещение (Kivy: Y идет от нижнего левого угла)
-            y_offset = texture_height - ((row + 1) * self.frame_height)
-            x_offset = col * self.frame_width
-
-            if DEBUG_MODE and frame_index == 0:
-                print(f"\n🖼 ЗАГРУЗКА СПРАЙТА для кнопки #{self.button_index + 1}")
-                print(f"   Всего кадров: {self.total_frames}")
-                print(f"   Строк: {self.rows}, Колонок: {self.cols}")
-                print(f"   Размер кадра: {self.frame_width}x{self.frame_height}")
-
-            if x_offset + self.frame_width <= sprite_sheet.texture.width and \
-                    y_offset >= 0 and y_offset + self.frame_height <= texture_height:
-
-                self.sprite_texture_region = sprite_sheet.texture.get_region(
-                    x=x_offset,
-                    y=y_offset,
-                    width=self.frame_width,
-                    height=self.frame_height
-                )
-
-                # Если изображение еще не создано, создаем новое
-                if self.sprite_image is None:
-                    self.sprite_image = KivyImage(
-                        texture=self.sprite_texture_region,
-                        allow_stretch=True,
-                        keep_ratio=False,
-                        size=(self.width, self.height),
-                        pos=(self.x, self.y)
-                    )
-                    self.add_widget(self.sprite_image)
-                    self.bind(pos=self._update_image_position, size=self._update_image_size)
-                else:
-                    # Обновляем текстуру существующего изображения
-                    self.sprite_image.texture = self.sprite_texture_region
-
-        except Exception as e:
-            if DEBUG_MODE:
-                print(f"❌ Ошибка загрузки спрайтлиста: {e}")
-
-    def set_frame(self, frame_index):
-        """Устанавливает конкретный кадр"""
-        if 0 <= frame_index < self.total_frames:
-            self.current_frame = frame_index
-            self._load_sprite(frame_index)
-
-    def get_row_start_frame(self, row):
-        """Возвращает первый кадр указанной строки"""
-        return row * self.cols
-
-    def animate_spin(self, target_row, duration=0.8, on_complete=None):
-        """
-        Анимация прокрутки кадров, останавливается на первом кадре целевой строки
-        target_row: целевая строка (0-9)
-        """
-        if self.is_animating:
-            return
-
-        self.is_animating = True
-
-        # Вычисляем целевой кадр (первый кадр целевой строки)
-        target_frame = target_row * self.cols
-        start_frame = self.current_frame
-
-        # Рассчитываем, сколько кадров нужно прокрутить
-        if start_frame <= target_frame:
-            frames_to_pass = target_frame - start_frame
-        else:
-            frames_to_pass = (self.total_frames - start_frame) + target_frame
-
-        # Всегда прокручиваем как минимум один полный круг
-        frames_to_pass += self.total_frames
-
-        step_duration = duration / frames_to_pass
-
-        def next_frame(dt):
-            if not self.is_animating:
-                return
-
-            # Переходим к следующему кадру
-            self.current_frame = (self.current_frame + 1) % self.total_frames
-            self._load_sprite(self.current_frame)
-
-            # Проверяем, достигли ли целевого кадра
-            if self.current_frame == target_frame:
-                self.is_animating = False
-                if on_complete:
-                    on_complete()
-            else:
-                # Продолжаем анимацию
-                Clock.schedule_once(next_frame, step_duration)
-
-        # Запускаем анимацию
-        Clock.schedule_once(next_frame, step_duration)
-
-    def _update_image_position(self, instance, value):
-        """Обновляет позицию изображения"""
-        if self.sprite_image:
-            self.sprite_image.pos = (self.x, self.y)
-
-    def _update_image_size(self, instance, value):
-        """Обновляет размер изображения"""
-        if self.sprite_image:
-            self.sprite_image.size = (self.width, self.height)
-
-    def on_press(self):
-        if self.sprite_image:
-            Animation(opacity=0.7, duration=0.05).start(self.sprite_image)
-        super().on_press()
-
-    def on_release(self):
-        if self.sprite_image:
-            Animation(opacity=1.0, duration=0.05).start(self.sprite_image)
-        super().on_release()
-
-
-class NeonButton(ButtonBehavior, KivyImage):
-    """Неоновая кнопка с вертикальным текстом поверх"""
-
-    def __init__(self, text='', text_color=(1, 1, 1, 1), text_size=30, debug_color=None, value=None, **kwargs):
-        super().__init__(**kwargs)
-        self.base_text = text
-        self.value = value
-        self.text_color = text_color
-        self.text_size = text_size
-        self.text_label = None
-        self.debug_color = debug_color
-        self.allow_stretch = True
-        self.keep_ratio = False
-
-        Clock.schedule_once(self._create_label, 0.2)
-
-    def update_value(self, new_value):
-        """Обновляет значение и текст на кнопке"""
-        self.value = new_value
-        if self.text_label:
-            if self.value is not None and self.base_text in ["MIN", "MAX"]:
-                self.text_label.text = f"{self.base_text}\n{self.value}"
-                print(f"🔄 Обновлена кнопка {self.base_text}: {self.value}")
-            else:
-                self.text_label.text = self.base_text
-            Clock.schedule_once(lambda dt: self._update_text_pos(), 0.05)
-
-    def _create_label(self, dt):
-        if self.text_label:
-            return
-
-        if not self.parent or self.width == 0 or self.height == 0:
-            Clock.schedule_once(self._create_label, 0.1)
-            return
-
-        display_text = self.base_text
-        if self.value is not None and self.base_text in ["MIN", "MAX"]:
-            display_text = f"{self.base_text}\n{self.value}"
-
-        self.text_label = Label(
-            text=display_text,
-            color=self.text_color,
-            font_size=self.text_size,
-            size_hint=(None, None),
-            halign='center',
-            valign='middle',
-            bold=True,
-            opacity=0
-        )
-
-        center_x = self.x + self.width / 2
-        center_y = self.y + self.height / 2
-
-        self.text_label.text_size = (None, None)
-        self.text_label.size = self.text_label.texture_size
-
-        with self.text_label.canvas.before:
-            PushMatrix()
-            Translate(center_x, center_y, 0)
-            Rotate(angle=270, origin=(0, 0))
-            Translate(-center_x, -center_y, 0)
-
-        with self.text_label.canvas.after:
-            PopMatrix()
-
-        self.text_label.pos = (
-            center_x - self.text_label.width / 2,
-            center_y - self.text_label.height / 2
-        )
-
-        self.parent.add_widget(self.text_label)
-        self.text_label.opacity = 1
-
-        self.bind(pos=self._update_text_pos, size=self._update_text_pos)
-
-    def _update_text_pos(self, *args):
-        if not self.text_label or not self.text_label.parent:
-            return
-
-        center_x = self.x + self.width / 2
-        center_y = self.y + self.height / 2
-
-        self.text_label.canvas.before.clear()
-        self.text_label.canvas.after.clear()
-
-        self.text_label.text_size = (None, None)
-        self.text_label.size = self.text_label.texture_size
-
-        with self.text_label.canvas.before:
-            PushMatrix()
-            Translate(center_x, center_y, 0)
-            Rotate(angle=270, origin=(0, 0))
-            Translate(-center_x, -center_y, 0)
-
-        with self.text_label.canvas.after:
-            PopMatrix()
-
-        self.text_label.pos = (
-            center_x - self.text_label.width / 2,
-            center_y - self.text_label.height / 2
-        )
-
-    def on_size(self, *args):
-        if self.text_label:
-            new_size = min(self.height / 1.5, self.width * 0.4)
-            self.text_label.font_size = max(16, min(new_size, 50))
-            self._update_text_pos()
-
-    def on_pos(self, *args):
-        if self.text_label:
-            self._update_text_pos()
-
-
-class NumberInputModal(ModalView):
-    """Модальное окно для ввода числа с ВЕРТИКАЛЬНЫМ текстом"""
-
-    def __init__(self, title="Введите число", current_value=0, on_submit=None, **kwargs):
-        super().__init__(**kwargs)
-        self.size_hint = (1.0, 1.0)
-        self.background_color = (0, 0, 0, 0)
-        self.auto_dismiss = True
-
-        self.title = title
-        self.current_value = current_value
-        self.on_submit = on_submit
-
-        # Основной контейнер
-        self.layout = FloatLayout(size_hint=(1, 1))
-        self.add_widget(self.layout)
-
-        # Затемненная подложка
-        with self.layout.canvas.before:
-            Color(0, 0, 0, 0.7)
-            self.overlay_rect = Rectangle(size=self.layout.size, pos=self.layout.pos)
-            self.layout.bind(size=self._update_overlay, pos=self._update_overlay)
-
-        # Анимация появления
-        self.layout.opacity = 0
-        self.layout.scale = 0.8
-
-        # Создаем UI
-        Clock.schedule_once(self.create_ui, 0.1)
-        Clock.schedule_once(lambda dt: self.animate_show(), 0.15)
-
-    def _update_overlay(self, instance, value):
-        self.overlay_rect.size = self.layout.size
-        self.overlay_rect.pos = self.layout.pos
-
-    def animate_show(self):
-        anim = Animation(opacity=1, scale=1, duration=0.3, t='out_back')
-        anim.start(self.layout)
-
-    def create_ui(self, dt=None):
-        """Создает элементы интерфейса с ВЕРТИКАЛЬНЫМ текстом"""
-
-        # Размеры экрана
-        screen_width = Window.width
-        screen_height = Window.height
-
-        # Центральная панель
-        panel_width = screen_width * 0.6
-        panel_height = screen_height * 0.55
-        panel_x = (screen_width - panel_width) / 2
-        panel_y = (screen_height - panel_height) / 2
-
-        # Панель с фоном
-        self.panel = Widget(
-            size_hint=(None, None),
-            size=(panel_width, panel_height),
-            pos=(panel_x, panel_y)
-        )
-
-        # Рисуем фон панели
-        with self.panel.canvas.before:
-            Color(0.05, 0.05, 0.05, 0.95)
-            self.panel_bg = Rectangle(size=self.panel.size, pos=self.panel.pos)
-            Color(0.2, 0.8, 1, 0.8)
-            self.panel_border = Line(
-                rectangle=(self.panel.pos[0], self.panel.pos[1],
-                           self.panel.size[0], self.panel.size[1]),
-                width=3
-            )
-
-        self.panel.bind(size=self._update_panel_bg, pos=self._update_panel_bg)
-
-        # === ВЕРТИКАЛЬНОЕ РАСПОЛОЖЕНИЕ С ВЕРТИКАЛЬНЫМ ТЕКСТОМ ===
-
-        # Расстояние между элементами
-        spacing = panel_height * 0.05
-
-        # Высота каждого элемента
-        title_height = panel_height * 0.15
-        input_height = panel_height * 0.2
-        button_height = panel_height * 0.15
-
-        # Общая высота всех элементов
-        total_height = title_height + input_height + button_height + (spacing * 2)
-
-        # Начальная Y координата (от верхней границы панели)
-        start_y = panel_y + panel_height - (panel_height - total_height) / 2 - title_height
-
-        # 1. ЗАГОЛОВОК (С ВЕРТИКАЛЬНЫМ ТЕКСТОМ)
-        self.title_label = Label(
-            text=self.title,
-            font_size=min(panel_height * 0.08, 28),
-            color=(0.2, 0.8, 1, 1),
-            size_hint=(None, None),
-            size=(title_height, panel_width * 0.8),
-            pos=(
-                panel_x + (panel_width - title_height) / 2,
-                start_y
-            ),
-            bold=True,
-            halign='center',
-            valign='middle'
-        )
-        self.title_label.text_size = self.title_label.size
-
-        # Поворачиваем заголовок на 90 градусов
-        center_x = self.title_label.x + self.title_label.width / 2
-        center_y = self.title_label.y + self.title_label.height / 2
-        with self.title_label.canvas.before:
-            PushMatrix()
-            Translate(center_x, center_y, 0)
-            Rotate(angle=90, origin=(0, 0))
-            Translate(-center_x, -center_y, 0)
-        with self.title_label.canvas.after:
-            PopMatrix()
-
-        self.panel.add_widget(self.title_label)
-
-        # 2. ПОЛЕ ВВОДА (ПОД ЗАГОЛОВКОМ) - обычное горизонтальное
-        input_y = start_y - spacing - input_height
-
-        self.text_input = TextInput(
-            text=str(self.current_value),
-            font_size=min(panel_height * 0.08, 36),
-            size_hint=(None, None),
-            size=(panel_width * 0.7, input_height),
-            pos=(
-                panel_x + (panel_width - panel_width * 0.7) / 2,
-                input_y
-            ),
-            multiline=False,
-            input_filter='int',
-            halign='center',
-            background_color=(0.15, 0.15, 0.15, 1),
-            foreground_color=(1, 1, 1, 1),
-            cursor_color=(0.2, 0.8, 1, 1),
-            background_normal=''
-        )
-        self.panel.add_widget(self.text_input)
-
-        # 3. КНОПКА ПОДТВЕРЖДЕНИЯ (С ВЕРТИКАЛЬНЫМ ТЕКСТОМ)
-        button_y = input_y - spacing - button_height
-
-        self.submit_button = Button(
-            text="ПОДТВЕРДИТЬ",
-            font_size=min(panel_height * 0.06, 22),
-            size_hint=(None, None),
-            size=(button_height, panel_width * 0.5),
-            pos=(
-                panel_x + (panel_width - button_height) / 2,
-                button_y
-            ),
-            background_normal='',
-            background_color=(0.2, 0.6, 0.2, 1),
-            color=(1, 1, 1, 1),
-            bold=True
-        )
-
-        # Поворачиваем текст кнопки на 90 градусов
-        btn_center_x = self.submit_button.x + self.submit_button.width / 2
-        btn_center_y = self.submit_button.y + self.submit_button.height / 2
-        with self.submit_button.canvas.before:
-            PushMatrix()
-            Translate(btn_center_x, btn_center_y, 0)
-            Rotate(angle=90, origin=(0, 0))
-            Translate(-btn_center_x, -btn_center_y, 0)
-        with self.submit_button.canvas.after:
-            PopMatrix()
-
-        self.submit_button.bind(on_press=self.on_button_press)
-        self.submit_button.bind(on_release=self.on_button_release)
-        self.panel.add_widget(self.submit_button)
-
-        self.layout.add_widget(self.panel)
-
-        # Фокусируемся на поле ввода
-        Clock.schedule_once(lambda dt: self._focus_input(), 0.2)
-
-        # Отладочная информация
-        if DEBUG_MODE:
-            print(f"\n📱 СОЗДАНО МОДАЛЬНОЕ ОКНО С ВЕРТИКАЛЬНЫМ ТЕКСТОМ:")
-            print(f"   Размер экрана: {screen_width}x{screen_height}")
-            print(f"   Размер панели: {panel_width}x{panel_height}")
-            print(f"   Заголовок Y: {start_y:.1f}")
-            print(f"   Поле ввода Y: {input_y:.1f}")
-            print(f"   Кнопка Y: {button_y:.1f}")
-
-    def _update_panel_bg(self, instance, value):
-        """Обновляет фон панели"""
-        if hasattr(self, 'panel_bg'):
-            self.panel_bg.size = self.panel.size
-            self.panel_bg.pos = self.panel.pos
-
-        if hasattr(self, 'panel_border'):
-            self.panel_border.rectangle = (
-                self.panel.pos[0], self.panel.pos[1],
-                self.panel.size[0], self.panel.size[1]
-            )
-
-        # Обновляем позиции при изменении размера
-        self._update_vertical_positions()
-
-    def _update_vertical_positions(self):
-        """Обновляет вертикальные позиции всех элементов с сохранением поворота"""
-        if not hasattr(self, 'panel'):
-            return
-
-        panel_x = self.panel.pos[0]
-        panel_y = self.panel.pos[1]
-        panel_width = self.panel.size[0]
-        panel_height = self.panel.size[1]
-
-        # Расстояние между элементами
-        spacing = panel_height * 0.05
-
-        # Высота каждого элемента
-        title_height = panel_height * 0.15
-        input_height = panel_height * 0.2
-        button_height = panel_height * 0.15
-
-        # Общая высота всех элементов
-        total_height = title_height + input_height + button_height + (spacing * 2)
-
-        # Начальная Y координата
-        start_y = panel_y + panel_height - (panel_height - total_height) / 2 - title_height
-
-        # Обновляем заголовок (с поворотом)
-        if hasattr(self, 'title_label'):
-            # Очищаем старые трансформации
-            self.title_label.canvas.before.clear()
-            self.title_label.canvas.after.clear()
-
-            # Обновляем размер и позицию
-            self.title_label.size = (title_height, panel_width * 0.8)
-            self.title_label.pos = (
-                panel_x + (panel_width - title_height) / 2,
-                start_y
-            )
-            self.title_label.text_size = self.title_label.size
-
-            # Применяем поворот заново
-            center_x = self.title_label.x + self.title_label.width / 2
-            center_y = self.title_label.y + self.title_label.height / 2
-            with self.title_label.canvas.before:
-                PushMatrix()
-                Translate(center_x, center_y, 0)
-                Rotate(angle=90, origin=(0, 0))
-                Translate(-center_x, -center_y, 0)
-            with self.title_label.canvas.after:
-                PopMatrix()
-
-        # Обновляем поле ввода (без поворота)
-        if hasattr(self, 'text_input'):
-            input_y = start_y - spacing - input_height
-            self.text_input.size = (panel_width * 0.7, input_height)
-            self.text_input.pos = (
-                panel_x + (panel_width - panel_width * 0.7) / 2,
-                input_y
-            )
-
-        # Обновляем кнопку (с поворотом)
-        if hasattr(self, 'submit_button'):
-            button_y = input_y - spacing - button_height
-
-            # Очищаем старые трансформации
-            self.submit_button.canvas.before.clear()
-            self.submit_button.canvas.after.clear()
-
-            # Обновляем размер и позицию
-            self.submit_button.size = (button_height, panel_width * 0.5)
-            self.submit_button.pos = (
-                panel_x + (panel_width - button_height) / 2,
-                button_y
-            )
-
-            # Применяем поворот заново
-            btn_center_x = self.submit_button.x + self.submit_button.width / 2
-            btn_center_y = self.submit_button.y + self.submit_button.height / 2
-            with self.submit_button.canvas.before:
-                PushMatrix()
-                Translate(btn_center_x, btn_center_y, 0)
-                Rotate(angle=90, origin=(0, 0))
-                Translate(-btn_center_x, -btn_center_y, 0)
-            with self.submit_button.canvas.after:
-                PopMatrix()
-
-    def on_button_press(self, instance):
-        Animation(background_color=(0.1, 0.8, 0.1, 1), duration=0.05).start(instance)
-        self.play_click_sound()
-
-    def on_button_release(self, instance):
-        Animation(background_color=(0.2, 0.6, 0.2, 1), duration=0.05).start(instance)
-        self.submit_value()
-
-    def play_click_sound(self):
-        try:
-            from kivy.core.audio import SoundLoader
-            sound = SoundLoader.load('assets/sounds/click.wav')
-            if sound:
-                sound.play()
-        except Exception:
-            pass
-
-    def _focus_input(self):
-        self.text_input.focus = True
-
-    def submit_value(self):
-        try:
-            text_value = self.text_input.text.strip()
-            if text_value == '' or text_value == '-':
-                value = 0
-            else:
-                value = int(text_value)
-
-            # Ограничиваем до 9 символов
-            value_str = str(abs(value))
-            if len(value_str) > 9:
-                if value >= 0:
-                    value = 999999999
-                else:
-                    value = -999999999
-
-            print(f"📤 Отправка значения: {value}")
-            if self.on_submit:
-                self.on_submit(value)
-
-            self.dismiss_with_animation()
-
-        except ValueError:
-            print(f"❌ Ошибка преобразования: {self.text_input.text}")
-            self.show_error_animation()
-
-    def dismiss_with_animation(self):
-        anim = Animation(opacity=0, duration=0.2)
-        anim.bind(on_complete=lambda *args: self.dismiss())
-        anim.start(self.layout)
-
-    def show_error_animation(self):
-        original_color = self.text_input.background_color
-        anim = Animation(background_color=(1, 0.2, 0.2, 1), duration=0.1)
-        anim += Animation(background_color=original_color, duration=0.1)
-        anim.start(self.text_input)
-
-        original_x = self.text_input.x
-        shake_anim = (
-                Animation(x=original_x - 10, duration=0.05) +
-                Animation(x=original_x + 10, duration=0.05) +
-                Animation(x=original_x - 5, duration=0.05) +
-                Animation(x=original_x + 5, duration=0.05) +
-                Animation(x=original_x, duration=0.05)
-        )
-        shake_anim.start(self.text_input)
-
-
-class RandomNumberScreen(BaseGameScreen):
-    """Экран для генерации случайного числа"""
+        self.keep_ratio = True
+        self.opacity = 0
+        self.rotation = random.uniform(0, 360)
+        self.is_loaded = False
+        self.chamber_sound = None
+
+    def set_loaded(self, loaded):
+        self.is_loaded = loaded
+        self.opacity = 1 if loaded else 0
+
+class BulletIcon(ButtonBehavior, Image):
+    """Иконка патрона в правом верхнем углу"""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.adaptive_background = None
-        self.neon_buttons = []
-        self.sprite_buttons = []
-        self.buttons_created = False
+        self.source = 'assets/images/guns/Drum_1024x1024.png'
+        self.size_hint = (None, None)
+        self.size = (60, 60)
+        self.allow_stretch = True
+        self.keep_ratio = True
+        self.update_border()
 
-        self.min_value = 0
-        self.max_value = 1000
-        self.is_positive = True
+    def update_border(self):
+        """Добавляет или обновляет обводку"""
+        self.canvas.after.clear()
+        with self.canvas.after:
+            Color(1, 1, 1, 0.3)
+            Line(width=2, rectangle=(self.x, self.y, self.width, self.height))
 
-        self.min_button = None
-        self.max_button = None
-        self.current_action = None
+    def on_pos(self, *args):
+        self.update_border()
+
+    def on_size(self, *args):
+        self.update_border()
+
+class BulletSlot(Button):
+    """Слот для патрона в барабане револьвера"""
+
+    def __init__(self, slot_number=0, **kwargs):
+        super().__init__(**kwargs)
+        self.slot_number = slot_number
+        self.has_bullet = False
+        self.is_current = False
+        self.background_normal = ''
+        self.background_color = (0.2, 0.2, 0.2, 0.8)
+        self.color = (1, 1, 1, 1)
+        self.font_size = '24sp'
+        self.bold = True
+        self.update_appearance()
+
+    def update_appearance(self):
+        """Обновляет внешний вид слота"""
+        if self.has_bullet:
+            self.text = "💀"
+            self.background_color = (0.8, 0.1, 0.1, 0.9)
+        else:
+            self.text = "○"
+            self.background_color = (0.3, 0.3, 0.3, 0.6)
+
+        self.update_current_indicator()
+
+    def update_current_indicator(self):
+        """Обновляет индикатор текущего слота"""
+        self.canvas.after.clear()
+        if self.is_current:
+            with self.canvas.after:
+                Color(1, 1, 0, 0.8)
+                Line(width=3, rectangle=(self.x + 2, self.y + 2, self.width - 4, self.height - 4))
+
+    def set_current(self, is_current):
+        """Устанавливает, является ли слот текущим"""
+        self.is_current = is_current
+        self.update_current_indicator()
+
+    def toggle_bullet(self):
+        """Переключает состояние патрона"""
+        self.has_bullet = not self.has_bullet
+        self.update_appearance()
+
+    def on_pos(self, *args):
+        """Обновляет индикатор при изменении позиции"""
+        # Ждем пока виджет полностью инициализируется
+        Clock.schedule_once(lambda dt: self.update_current_indicator(), 0.01)
+
+    def on_size(self, *args):
+        """Обновляет индикатор при изменении размера"""
+        # Ждем пока виджет полностью инициализируется
+        Clock.schedule_once(lambda dt: self.update_current_indicator(), 0.01)
+
+
+class ChamberModal(ModalView):
+    """Модальное окно барабана для зарядки патронов"""
+
+    def __init__(self, main_screen, **kwargs):
+        super().__init__(**kwargs)
+        self.main_screen = main_screen
+        self.background_color = (0, 0, 0, 0)  # УБРАН черный фон!
+        self.auto_dismiss = True
+        self.size_hint = (0.9, 0.9)
+        self.pos_hint = {'center_x': 0.5, 'center_y': 0.5}
+
+        self.layout = FloatLayout()
+        self.add_widget(self.layout)
+
+        self.bullet_sprites = []
+        self.slot_buttons = []
+
+        Clock.schedule_once(self.create_chamber_ui, 0.1)
+
+    def create_chamber_ui(self, dt=None):
+        """Создает интерфейс модального окна барабана"""
+        # === 1. БАРАБАН (фон) ===
+        drum_size = min(self.layout.width, self.layout.height) * 0.7
+        try:
+            drum_img = KivyImage(
+                source='assets/images/guns/Drum_1024x1024.png',
+                size_hint=(None, None),
+                size=(drum_size, drum_size),
+                pos_hint={'center_x': 0.5, 'center_y': 0.6},
+                allow_stretch=True,
+                keep_ratio=True
+            )
+            self.layout.add_widget(drum_img)
+        except Exception as e:
+            # Рисуем круг-заглушку
+            with self.layout.canvas:
+                Color(0.3, 0.3, 0.3, 0.8)
+                Line(circle=(self.layout.width * 0.5, self.layout.height * 0.6,
+                             drum_size / 2), width=3)
+
+        # Координаты в процентах от размера окна - ПОВЕРНУТЫ на 1/12 (30°)
+        slot_positions = [
+            (0.66, 0.77),  # слот 1 - верх
+            (0.785, 0.66),  # слот 2 - верх-право
+            (0.675, 0.55),  # слот 3 - право
+            (0.45, 0.55),  # слот 4 - низ
+            (0.33, 0.66),  # слот 5 - лево
+            (0.445, 0.765),  # слот 6 - верх-лево
+        ]
+
+        # Создаем патроны и зоны касания
+        for i, (rel_x, rel_y) in enumerate(slot_positions):
+            # Конвертируем относительные координаты в абсолютные
+            x = self.layout.width * rel_x
+            y = self.layout.height * rel_y
+
+            # === СПРАЙТ ПАТРОНА (сверху) ===
+            bullet = BulletSprite(
+                slot_number=i,
+                pos=(x - 50, y - 50)  # 100/2 = 50
+            )
+
+            # Копируем состояние из основного экрана
+            if i < len(self.main_screen.bullet_slots):
+                bullet.set_loaded(self.main_screen.bullet_slots[i].has_bullet)
+
+            self.bullet_sprites.append(bullet)
+            self.layout.add_widget(bullet)
+
+            # === ЗОНА КАСАНИЯ (невидимая кнопка) ===
+            slot_btn = Button(
+                size_hint=(None, None),
+                size=(70, 70),
+                pos=(x - 35, y - 35),
+                background_normal='',
+                background_color=(0, 0, 0, 0),
+                opacity=0.01
+            )
+            slot_btn.bind(on_release=lambda instance, idx=i: self.toggle_slot(idx))
+
+            self.slot_buttons.append(slot_btn)
+            self.layout.add_widget(slot_btn)
+
+        # ✅ ИЗМЕНЕНО: Вместо кнопки LOAD - изображение
+        self.create_close_image()
+
+    def create_close_image(self):
+        """Создает изображение для закрытия модального окна"""
+
+        # Путь к изображению (измените на ваш файл)
+        close_image_path = 'assets/images/guns/load_button.png'
+
+        # Проверяем существование файла
+        if os.path.exists(close_image_path):
+            # Создаем изображение с поведением кнопки
+            class ImageButton(ButtonBehavior, KivyImage):
+                pass
+
+            close_btn = ImageButton(
+                source=close_image_path,
+                size_hint=(None, None),
+                size=(200, 200),  # Размер под ваш дизайн
+                pos_hint={'center_x': 0.5, 'y': 0.05},
+                allow_stretch=True,
+                keep_ratio=True
+            )
+        else:
+            # Если файл не найден, создаем текстовую кнопку как запасной вариант
+            print(f"⚠️ Файл {close_image_path} не найден, использую текстовую кнопку")
+            close_btn = Button(
+                text='ЗАКРЫТЬ',
+                font_size='20sp',
+                bold=True,
+                size_hint=(None, None),
+                size=(150, 60),
+                pos_hint={'center_x': 0.5, 'y': 0.05},
+                background_color=(0.3, 0.3, 0.3, 0.8),
+                background_normal='',
+                color=(1, 1, 1, 1)
+            )
+
+        # Привязываем закрытие с звуком
+        close_btn.bind(on_release=self.close_modal_with_sound)
+        self.layout.add_widget(close_btn)
+
+    def toggle_slot(self, slot_index):
+        """Переключает патрон в слоте"""
+        bullet = self.bullet_sprites[slot_index]
+        new_state = not bullet.is_loaded
+        bullet.set_loaded(new_state)
+
+        # Воспроизводим звук зарядки/разрядки через главный экран
+        if hasattr(self.main_screen, 'play_bullet_load_sound'):
+            self.main_screen.play_bullet_load_sound()
+
+        # Визуальная обратная связь
+        btn = self.slot_buttons[slot_index]
+        original_color = btn.background_color
+        btn.background_color = (1, 1, 1, 0.2)
+        Clock.schedule_once(lambda dt: self.reset_button_color(btn, original_color), 0.1)
+
+    def reset_button_color(self, btn, original_color):
+        """Сбрасывает цвет кнопки"""
+        btn.background_color = original_color
+
+    def close_modal(self, instance):
+        """Закрывает модальное окно и обновляет основной экран"""
+        # Переносим состояние в основной экран
+        for i, bullet in enumerate(self.bullet_sprites):
+            if i < len(self.main_screen.bullet_slots):
+                self.main_screen.bullet_slots[i].has_bullet = bullet.is_loaded
+                self.main_screen.bullet_slots[i].update_appearance()
+
+        # Обновляем счетчик патронов
+        self.main_screen.total_bullets = sum(1 for s in self.main_screen.bullet_slots if s.has_bullet)
+        self.main_screen.update_bullet_counter()
+
+        self.dismiss()
+
+    def close_modal_with_sound(self, instance):
+        """Закрывает модальное окно с воспроизведением звука"""
+        # Воспроизводим звук через главный экран
+        if hasattr(self.main_screen, 'play_chamber_sound'):
+            self.main_screen.play_chamber_sound()
+
+        # Вызываем существующий метод close_modal для закрытия и обновления
+        self.close_modal(instance)
+
+    def update_bg(self, instance, value):
+        """Обновляет фон"""
+        pass  # Фон больше не нужен
+
+class RusRouletteScreen(BaseGameScreen):
+    """Реалистичная русская рулетка с жестовым управлением"""
+
+    background_image = 'assets/backgrounds/rus_roulette_bg_1024x1024.jpg'
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.name = 'rus_roulette'
+
+        # Элементы игры
+        self.gun_image = None
+        self.bullet_slots = []
+        self.current_slot = 0
+        self.result_label = None
+        self.shot_counter = None
+        self.shots_fired = 0
+        self.total_bullets = 0
+        self.gun_rotation = 0
+
+        # Иконка патрона
+        self.bullet_icon = None
+
+        # Для жестового управления
+        self.touch_start_pos = None
+        self.touch_start_time = None
+        self.is_dragging = False
+        self.drag_start_pos = None
+
+        # Модальное окно
+        self.chamber_modal = None
+
+        # НОВОЕ: прямоугольник для анимации барабана
+        self.chamber_highlight = None
+
+        # SoundManager для управления фоновой музыкой
+        self.sound_manager = SoundManager()
+
+        # Звуки
+        self.chamber_sound = None
+        self.gun_shot_sound = None  # Звук выстрела
+        self.misfire_sound = None  # Звук осечки
+        self.bullet_load_sound = None  # Звук зарядки/разрядки патрона
+        self.revolve_sound = None
+        self.bind(size=self._update_positions)
+
+        # Флаг блокировки выстрела (предотвращает двойные выстрелы)
+        self.is_processing_shot = False
+
+    def play_revolve_sound(self):
+        """Воспроизводит звук вращения барабана"""
+        try:
+            if not self.revolve_sound:
+                self.revolve_sound = SoundLoader.load('assets/sounds/Roulette/revolve.ogg')
+                if not self.revolve_sound:
+                    print("Не удалось загрузить звук: assets/sounds/Roulette/revolve.ogg")
+                    return
+
+            if self.revolve_sound:
+                if self.revolve_sound.state == 'play':
+                    self.revolve_sound.stop()
+                self.revolve_sound.play()
+        except Exception as e:
+            print(f"Ошибка при воспроизведении звука вращения: {e}")
+
+
+    def play_bullet_load_sound(self):
+        """Воспроизводит звук зарядки/разрядки патрона"""
+        try:
+            if not self.bullet_load_sound:
+                self.bullet_load_sound = SoundLoader.load('assets/sounds/Roulette/bullet_load.ogg')
+                if not self.bullet_load_sound:
+                    print("Не удалось загрузить звук: assets/sounds/Roulette/bullet_load.ogg")
+                    return
+
+            if self.bullet_load_sound:
+                if self.bullet_load_sound.state == 'play':
+                    self.bullet_load_sound.stop()
+                self.bullet_load_sound.play()
+        except Exception as e:
+            print(f"Ошибка при воспроизведении звука зарядки: {e}")
+
+    def play_chamber_sound(self):
+        """Воспроизводит звук открытия барабана"""
+        try:
+            if not self.chamber_sound:
+                self.chamber_sound = SoundLoader.load('assets/sounds/Roulette/chamber_out.ogg')
+
+            if self.chamber_sound:
+                if self.chamber_sound.state == 'play':
+                    self.chamber_sound.stop()
+                self.chamber_sound.play()
+        except Exception as e:
+            print(f"Ошибка при воспроизведении звука: {e}")
 
     def on_enter(self):
         """При входе на экран"""
-        if not self.adaptive_background:
-            self.adaptive_background = AdaptiveBackground(
-                source='assets/backgrounds/random_number_bg.png'
-            )
-            self.layout.add_widget(self.adaptive_background, index=0)
+        # Убавляем фоновую музыку до 5% за 1 секунду
+        self.sound_manager.fade_to(0.05, duration=1.0)
 
-        if not self.buttons_created:
-            self.create_back_button()
-            self.create_neon_buttons()
-            self.create_sprite_buttons()
-            self.buttons_created = True
+        # Сбрасываем игру при входе
+        self.start_game()
+
+    def create_game_screen(self, dt=None):
+        """Создает игровой экран"""
+        # Очищаем layout
+        self.layout.clear_widgets()
+
+        # Восстанавливаем фон и кнопку назад
+        super().on_enter()
+
+        # Сначала создаем пистолет (нижний слой)
+        self.create_gun()
+
+        self.create_back_button()
+
+        # Затем барабанные слоты (для хранения состояния)
+        self.create_bullet_chamber()
+
+        # Затем информационные надписи (средний слой)
+        self.create_info_labels()
+
+        # НОВОЕ: создаем прямоугольник для анимации барабана (поверх пистолета)
+        self.create_chamber_highlight()
+
+        # Иконка патрона должна быть ПОСЛЕДНЕЙ (верхний слой)
+        self.create_bullet_icon()
+
+        # Инициализируем все слоты как пустые
+        self.initialize_empty_chamber()
+
+        # Обновляем состояние
+        self.update_bullet_counter()
+        self.update_current_slot()
+
+    def create_chamber_highlight(self):
+        """Создает прямоугольник для анимации барабана"""
+        from kivy.uix.widget import Widget
+        from kivy.graphics import Color, Rectangle
+
+        self.chamber_highlight = Widget()
+        self.chamber_highlight.size_hint = (None, None)
+        self.chamber_highlight.size = (110, 117)  # РАЗМЕР ПРЯМОУГОЛЬНИКА
+
+        # Позиция по умолчанию - центр пистолета
+        self.chamber_highlight.pos = (Window.width * 0.54, Window.height * 0.47)  # ПОЗИЦИЯ
+
+        # Рисуем прямоугольник с прозрачностью
+        with self.chamber_highlight.canvas:
+            Color(0.1, 0.1, 0.1, 0.5)  # Серый
+            self.highlight_rect = Rectangle(
+                pos=self.chamber_highlight.pos,
+                size=self.chamber_highlight.size
+            )
+
+        # По умолчанию скрыт
+        self.chamber_highlight.opacity = 0
+        self.layout.add_widget(self.chamber_highlight)
+
+    def spin_chamber(self):
+        """Вращение барабана (вызывается при свайпе)"""
+        # Воспроизводим звук вращения
+        self.play_revolve_sound()
+
+        # Сохраняем старую позицию для анимации
+        old_slot = self.current_slot
+        self.current_slot = random.randint(0, 5)
+        self.animate_chamber_highlight()
+
+    def animate_chamber_highlight(self):
+        """Анимация прямоугольника барабана (мерцание)"""
+        if not self.chamber_highlight:
+            return
+
+        # Сначала убеждаемся, что пистолет НЕ анимируется
+        if hasattr(self, 'gun_image') and self.gun_image:
+            # Отменяем все текущие анимации пистолета
+            Animation.cancel_all(self.gun_image)
+            # Возвращаем нормальную прозрачность
+            self.gun_image.opacity = 1
+
+        # Показываем прямоугольник
+        self.chamber_highlight.opacity = 1
+
+        # МЕДЛЕННОЕ МЕРЦАНИЕ - увеличиваем duration
+        anim = Animation(opacity=0.2, duration=0.1) + Animation(opacity=0.9, duration=0.1)
+        anim.repeat = True
+        anim.start(self.chamber_highlight)
+
+        # УВЕЛИЧИВАЕМ ПРОДОЛЖИТЕЛЬНОСТЬ
+        Clock.schedule_once(lambda dt: self.stop_chamber_animation(anim), 0.5)
+
+    def stop_chamber_animation(self, anim):
+        """Останавливает анимацию барабана"""
+        if self.chamber_highlight:
+            anim.stop(self.chamber_highlight)
+            self.chamber_highlight.opacity = 0  # Скрываем прямоугольник
+        self.finish_spin(0)
+
+    def finish_spin(self, dt):
+        """Завершение вращения"""
+        self.result_label.color = (1, 1, 1, 1)
+        self.update_current_slot()
+
+    def initialize_empty_chamber(self):
+        """Инициализирует все слоты как пустые"""
+        for slot in self.bullet_slots:
+            slot.has_bullet = False
+            slot.update_appearance()
+
+        # Устанавливаем текущий слот (первый)
+        self.current_slot = 0
+        self.total_bullets = 0
+
+    def create_bullet_icon(self):
+        """Создает иконку патрона в правом верхнем углу"""
+        if self.bullet_icon:
+            self.layout.remove_widget(self.bullet_icon)
+
+        self.bullet_icon = BulletIcon(
+            pos_hint={'right': 0.95, 'top': 0.95}
+        )
+        self.bullet_icon.bind(on_release=self.show_chamber_modal)
+        self.layout.add_widget(self.bullet_icon)
+
+    def create_gun(self):
+        """Создает изображение пистолета с жестовым управлением"""
+        if self.gun_image:
+            self.layout.remove_widget(self.gun_image)
+
+        try:
+            self.gun_image = KivyImage(
+                source='assets/images/guns/revolver.png',
+                size_hint=(1, 1),  # На весь экран
+                pos_hint={'center_x': 0.5, 'center_y': 0.5},
+                allow_stretch=True,
+                keep_ratio=True  # Сохраняем пропорции
+            )
+        except:
+            # Заглушка если нет изображения
+            self.gun_image = Button(
+                text='🔫\n(Жестовое управление)\nВесь экран',
+                font_size='20sp',
+                size_hint=(1, 1),
+                pos_hint={'center_x': 0.5, 'center_y': 0.5},
+                background_color=(0.3, 0.3, 0.3, 1),
+                color=(1, 1, 1, 1)
+            )
+
+        # Включаем мультитач для жестов
+        self.gun_image.multitouch_on_box = True
+
+        # Обработчики жестов
+        self.gun_image.bind(on_touch_down=self.on_gun_touch_down)
+        self.gun_image.bind(on_touch_move=self.on_gun_touch_move)
+        self.gun_image.bind(on_touch_up=self.on_gun_touch_up)
+
+        self.layout.add_widget(self.gun_image)
+
+    def create_bullet_chamber(self):
+        """Создает барабан с 6 слотами для патронов"""
+        # Удаляем старые слоты
+        for slot in self.bullet_slots:
+            self.layout.remove_widget(slot)
+        self.bullet_slots = []
+
+        # СОЗДАЕМ 6 СЛОТОВ (невидимых, для хранения состояния)
+        for i in range(6):
+            slot = BulletSlot(
+                slot_number=i,
+                size_hint=(None, None),
+                size=(1, 1),  # Крошечные, невидимые
+                pos=(-100, -100),  # За экраном
+                opacity=0  # Полностью прозрачные
+            )
+            self.bullet_slots.append(slot)
+            self.layout.add_widget(slot)
+
+    def create_info_labels(self):
+        """Создает информационные надписи"""
+        # Заголовок
+        title = Label(
+            text='RUSSIAN ROULETTE',
+            font_size='22sp',
+            bold=True,
+            color=(1, 0.2, 0.2, 1),
+            pos_hint={'center_x': 0.5, 'top': 1},
+            size_hint=(None, None),
+            size=(450, 50)
+        )
+        self.layout.add_widget(title)
+
+        # ВЕРНУЛИ result_label - он нужен для отображения состояния!
+        self.result_label = Label(
+            text='',
+            font_size='14sp',
+            color=(1, 1, 1, 1),
+            halign='center',
+            pos_hint={'center_x': 0.5, 'top': 0.85},
+            size_hint=(None, None),
+            size=(500, 60)
+        )
+        self.layout.add_widget(self.result_label)
+
+    def update_current_slot(self):
+        """Обновляет подсветку текущего слота"""
+        for i, slot in enumerate(self.bullet_slots):
+            slot.set_current(i == self.current_slot)
+
+    def play_gun_shot_sound(self):
+        """Воспроизводит звук выстрела"""
+        try:
+            if not self.gun_shot_sound:
+                self.gun_shot_sound = SoundLoader.load('assets/sounds/Roulette/gun_shot.ogg')
+                if not self.gun_shot_sound:
+                    print("Не удалось загрузить звук: assets/sounds/Roulette/gun_shot.ogg")
+                    return
+
+            if self.gun_shot_sound:
+                if self.gun_shot_sound.state == 'play':
+                    self.gun_shot_sound.stop()
+                self.gun_shot_sound.play()
+        except Exception as e:
+            print(f"Ошибка при воспроизведении звука выстрела: {e}")
+
+    def play_misfire_sound(self):
+        """Воспроизводит звук осечки"""
+        try:
+            if not self.misfire_sound:
+                self.misfire_sound = SoundLoader.load('assets/sounds/Roulette/misfire.ogg')
+                if not self.misfire_sound:
+                    print("Не удалось загрузить звук: assets/sounds/Roulette/misfire.ogg")
+                    return
+
+            if self.misfire_sound:
+                if self.misfire_sound.state == 'play':
+                    self.misfire_sound.stop()
+                self.misfire_sound.play()
+        except Exception as e:
+            print(f"Ошибка при воспроизведении звука осечки: {e}")
+
+    def check_shot_result(self):
+        """Проверяет результат выстрела"""
+        # Проверяем, что есть слоты
+        if not self.bullet_slots or self.current_slot >= len(self.bullet_slots):
+            # Если слотов нет, просто показываем сообщение
+            self.result_label.text = 'Ошибка: нет данных о патронах'
+            self.result_label.color = (1, 0, 0, 1)
+            Clock.schedule_once(self.reset_result_text, 2.0)
+            return
+
+        current_slot = self.bullet_slots[self.current_slot]
+
+        if current_slot.has_bullet:
+            # Анимация отдачи (звук уже воспроизведен в pull_trigger)
+            anim = Animation(pos_hint={'center_x': 0.52, 'center_y': 0.55}, duration=0.1)
+            anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.55}, duration=0.1)
+            anim.start(self.gun_image)
+
+            # Убираем патрон
+            current_slot.has_bullet = False
+            current_slot.update_appearance()
+            self.total_bullets -= 1
+            self.update_bullet_counter()
+
+        self.shots_fired += 1
+        self.current_slot = (self.current_slot + 1) % 6
+
+        self.update_bullet_counter()
+
+        # Нормализуем вращение
+        self.gun_rotation = self.gun_rotation % 360
+        self.gun_image.rotation = 0
+
+        self.update_current_slot()
+
+    def show_chamber_modal(self, instance):
+        """Показывает модальное окно барабана для зарядки"""
+        # Воспроизводим звук открытия барабана
+        self.play_chamber_sound()  # Звук при открытии
+
+        # Эффект затемнения
+        self.chamber_modal = ChamberModal(self)
+        self.chamber_modal.open()
+
+    def on_gun_touch_down(self, instance, touch):
+        """Обработка касания пистолета"""
+        if not self.gun_image.collide_point(*touch.pos):
+            return False
+
+        # Сохраняем начальную позицию и время
+        self.touch_start_pos = touch.pos
+        self.touch_start_time = touch.time_start
+        self.is_dragging = False
+
+        # Определяем зону касания
+        gun_pos = self.gun_image.pos
+        gun_size = self.gun_image.size
+
+        # === ЗОНА КУРКА (центр-вниз) ===
+        trigger_zone = (
+            gun_pos[0] + gun_size[0] * 0.1,  # 30% слева
+            gun_pos[1] + gun_size[1] * 0.05,  # 5% сверху (внизу)
+            gun_size[0] * 1,  # 90% ширины
+            gun_size[1] * 0.4  # 30% высоты
+        )
+
+        # === ЗОНА БАРАБАНА (весь центр) ===
+        chamber_zone = (
+            gun_pos[0] + gun_size[0] * 0.1,  # 10% слева
+            gun_pos[1] + gun_size[1] * 0.3,  # 30% сверху
+            gun_size[0] * 0.8,  # 80% ширины
+            gun_size[1] * 0.4  # 40% высоты
+        )
+
+        # Проверяем, в какой зоне касание
+        tx, ty = touch.pos
+
+        # Если тап по курку (центр-вниз)
+        if (trigger_zone[0] <= tx <= trigger_zone[0] + trigger_zone[2] and
+                trigger_zone[1] <= ty <= trigger_zone[1] + trigger_zone[3]):
+            self.pull_trigger()
+            return True
+
+        # Если касание в зоне барабана (весь центр)
+        elif (chamber_zone[0] <= tx <= chamber_zone[0] + chamber_zone[2] and
+              chamber_zone[1] <= ty <= chamber_zone[1] + chamber_zone[3]):
+            self.drag_start_pos = touch.pos
+            self.is_dragging = True
+            return True
+
+        return True
+
+    def on_gun_touch_move(self, instance, touch):
+        """Обработка движения по пистолету"""
+        if not self.is_dragging or not self.drag_start_pos:
+            return False
+
+        # Вычисляем расстояние свайпа
+        dx = touch.pos[0] - self.drag_start_pos[0]
+        dy = touch.pos[1] - self.drag_start_pos[1]
+        distance = Vector(dx, dy).length()
+
+        # Если свайп достаточно длинный - вращаем барабан
+        if distance > 30:  # порог свайпа
+            self.spin_chamber()
+            self.is_dragging = False
+            self.drag_start_pos = None
+
+        return True
+
+    def on_gun_touch_up(self, instance, touch):
+        """Обработка отпускания пистолета"""
+        self.is_dragging = False
+        self.drag_start_pos = None
+        return True
+
+    def toggle_slot_bullet(self, slot_index):
+        """Добавляет/убирает патрон в слоте"""
+        slot = self.bullet_slots[slot_index]
+        slot.toggle_bullet()
+
+        self.total_bullets = sum(1 for s in self.bullet_slots if s.has_bullet)
+        self.update_bullet_counter()
+
+        # Визуальная обратная связь
+        self.result_label.text = f'Слот {slot_index + 1}: {"заряжен" if slot.has_bullet else "разряжен"}'
+        self.result_label.color = (0.8, 0.8, 0.8, 1)
+        Clock.schedule_once(self.reset_result_text, 1.5)
+
+    def update_bullet_counter(self):
+        """Обновляет счетчик патронов"""
+        self.total_bullets = sum(1 for s in self.bullet_slots if s.has_bullet)
+
+    def pull_trigger(self):
+        """Спуск курка (вызывается при тапе по курку)"""
+        # === БЛОКИРОВКА ПОВТОРНЫХ НАЖАТИЙ ===
+        if self.is_processing_shot:
+            print("⚠️ Выстрел уже обрабатывается, игнорирую")
+            return
+
+        self.is_processing_shot = True
+
+        current_slot = self.bullet_slots[self.current_slot]
+
+        if current_slot.has_bullet:
+            # ЗАРЯЖЕН - звук выстрела
+            self.play_gun_shot_sound()
+
+            # ДВОЙНАЯ ТРЯСКА (0.4 сек)
+            anim = Animation(pos_hint={'center_x': 0.52, 'center_y': 0.53}, duration=0.05)
+            anim += Animation(pos_hint={'center_x': 0.48, 'center_y': 0.57}, duration=0.05)
+            anim += Animation(pos_hint={'center_x': 0.52, 'center_y': 0.53}, duration=0.05)
+            anim += Animation(pos_hint={'center_x': 0.48, 'center_y': 0.57}, duration=0.05)
+            anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.55}, duration=0.05)
+            anim.start(self.gun_image)
+
+            # РАЗБЛОКИРОВКА ПОСЛЕ ЗАВЕРШЕНИЯ
+            Clock.schedule_once(lambda dt: self._finish_shot(), 0.35)
         else:
-            self.update_min_max_buttons()
+            # ПУСТОЙ - звук осечки
+            self.play_misfire_sound()
+
+            # МИНИМАЛЬНАЯ ТРЯСКА (0.15 сек)
+            anim = Animation(pos_hint={'center_x': 0.51, 'center_y': 0.51}, duration=0.03)
+            anim += Animation(pos_hint={'center_x': 0.49, 'center_y': 0.5}, duration=0.03)
+            anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.49}, duration=0.03)
+            anim.start(self.gun_image)
+
+            # РАЗБЛОКИРОВКА ПОСЛЕ ЗАВЕРШЕНИЯ
+            Clock.schedule_once(lambda dt: self._finish_shot(), 0.15)
+
+    def _finish_shot(self):
+        """Завершает обработку выстрела и разблокирует кнопку"""
+        self.check_shot_result()
+        self.is_processing_shot = False
+
+    def reset_result_text(self, dt):
+        """Сбрасывает текст результата"""
+        self.result_label.text = ''
+
+    def start_game(self):
+        """Начать игру"""
+        # Сбрасываем состояние
+        self.current_slot = 0
+        self.shots_fired = 0
+        self.total_bullets = 0
+        self.gun_rotation = 0
+        self.is_processing_shot = False
+
+        # Очищаем все патроны
+        for slot in self.bullet_slots:
+            slot.has_bullet = False
+            slot.update_appearance()
+
+        # Создаем игровой экран
+        self.create_game_screen()
+
+    def _update_positions(self, instance, value):
+        """Обновление позиций при изменении размера"""
+        if self.gun_image:
+            self.gun_image.pos_hint = {'center_x': 0.5, 'center_y': 0.55}
+
+        # НОВОЕ: обновляем позицию прямоугольника при изменении размера окна
+        if self.chamber_highlight:
+            # Автоматически подстраиваем позицию под размер окна
+            self.chamber_highlight.pos = (Window.width * 0.43, Window.height * 0.45)
+            if hasattr(self, 'highlight_rect'):
+                self.highlight_rect.pos = self.chamber_highlight.pos
+
+        if self.bullet_slots:
+            Clock.schedule_once(lambda dt: self.create_bullet_chamber(), 0.1)
 
     def on_leave(self):
         """При выходе с экрана"""
-        for button in self.neon_buttons:
-            if button.text_label and button.text_label in self.layout.children:
-                button.text_label.opacity = 0
-                self.layout.remove_widget(button.text_label)
-                button.text_label = None
+        # Возвращаем громкость фоновой музыки до 100%
+        self.sound_manager.fade_to(1.0, duration=0.5)
 
+        # Очищаем звуки
+        if hasattr(self, 'chamber_sound') and self.chamber_sound:
+            self.chamber_sound.stop()
+            self.chamber_sound = None
+
+        if hasattr(self, 'gun_shot_sound') and self.gun_shot_sound:
+            self.gun_shot_sound.stop()
+            self.gun_shot_sound = None
+
+        if hasattr(self, 'misfire_sound') and self.misfire_sound:
+            self.misfire_sound.stop()
+            self.misfire_sound = None
+
+        if hasattr(self, 'bullet_load_sound') and self.bullet_load_sound:
+            self.bullet_load_sound.stop()
+            self.bullet_load_sound = None
+
+        if hasattr(self, 'revolve_sound') and self.revolve_sound:
+            self.revolve_sound.stop()
+            self.revolve_sound = None
+
+        # Вызываем родительский метод
         super().on_leave()
 
-    def create_back_button(self):
-        """Создает кнопку возврата в меню"""
-        back_btn = ImageButton(
-            source='assets/images/buttons/Orange_back_to_menu_button_90.png',
-            size_hint=(0.12, 0.12),
-            pos_hint={'x': 0.03, 'y': 0.85},
-            allow_stretch=True
-        )
-
-        def on_press(instance):
-            Animation(opacity=0.7, duration=0.1).start(instance)
-
-        def on_release(instance):
-            Animation(opacity=1.0, duration=0.1).start(instance)
-            self.play_back_sound()
-            Clock.schedule_once(lambda dt: self.go_to_menu(), 0.1)
-
-        back_btn.bind(on_press=on_press)
-        back_btn.bind(on_release=on_release)
-
-        self.back_button = back_btn
-        self.layout.add_widget(back_btn)
-
-    def create_sprite_buttons(self):
-        """Создает 10 кнопок с изображениями из спрайтлиста"""
-        sprite_sheet_path = 'assets/sprites/numbers_spritesheet.png'
-
-        button_positions = [
-            {'x': 0.52, 'y': 0.915},  # Кнопка 1 - ЗНАК (+/-)
-            {'x': 0.52, 'y': 0.815},  # Кнопка 2 - миллиарды
-            {'x': 0.52, 'y': 0.72},  # Кнопка 3 - сотни миллионов
-            {'x': 0.52, 'y': 0.62},  # Кнопка 4 - десятки миллионов
-            {'x': 0.52, 'y': 0.52},  # Кнопка 5 - единицы миллионов
-            {'x': 0.52, 'y': 0.42},  # Кнопка 6 - сотни тысяч
-            {'x': 0.52, 'y': 0.32},  # Кнопка 7 - десятки тысяч
-            {'x': 0.52, 'y': 0.225},  # Кнопка 8 - единицы тысяч
-            {'x': 0.52, 'y': 0.125},  # Кнопка 9 - сотни
-            {'x': 0.52, 'y': 0.025},  # Кнопка 10 - единицы
-        ]
-
-        button_size_hint = (0.28, 0.062)
-
-        for i, pos in enumerate(button_positions):
-            sprite_button = SpriteSheetButton(
-                button_index=i,
-                sprite_sheet_path=sprite_sheet_path,
-                size_hint=button_size_hint,
-                pos_hint={'x': pos['x'], 'y': pos['y']}
-            )
-
-            sprite_button.button_id = i
-            sprite_button.button_number = i + 1
-
-            sprite_button.bind(on_press=self.on_sprite_button_press)
-            sprite_button.bind(on_release=self.on_sprite_button_release)
-
-            self.layout.add_widget(sprite_button)
-            self.sprite_buttons.append(sprite_button)
-
-    def on_sprite_button_press(self, instance):
-        print(f"🎮 Нажата кнопка #{instance.button_number}")
-        self.play_click_sound()
-
-    def on_sprite_button_release(self, instance):
-        pass
-
-    def spin_all_buttons(self, target_rows, sign_row=None):
-        """Запускает анимацию прокрутки для всех кнопок"""
-        print(f"\n🎬 ЗАПУСК АНИМАЦИИ ДЛЯ {len(self.sprite_buttons)} КНОПОК")
-
-        completed = [0]
-
-        def on_animation_complete():
-            completed[0] += 1
-            if completed[0] >= len(self.sprite_buttons):
-                print(f"🎬 ВСЕ АНИМАЦИИ ЗАВЕРШЕНЫ!")
-
-        # Анимация для кнопки знака
-        if sign_row is not None and len(self.sprite_buttons) > 0:
-            sign_button = self.sprite_buttons[0]
-            Clock.schedule_once(
-                lambda dt: sign_button.animate_spin(sign_row, duration=0.8, on_complete=on_animation_complete), 0)
-            print(f"   Кнопка 1 (ЗНАК): цель - строка {sign_row}")
-
-        # Анимация для цифровых кнопок
-        for i, button in enumerate(self.sprite_buttons[1:], start=1):
-            target_row = target_rows[i - 1]
-            delay = i * 0.03
-
-            def start_animation(btn, row, delay_time):
-                Clock.schedule_once(lambda dt: btn.animate_spin(row, duration=0.8, on_complete=on_animation_complete),
-                                    delay_time)
-
-            start_animation(button, target_row, delay)
-            print(f"   Кнопка {i + 1}: цель - строка {target_row} (кадр {target_row * 12})")
-
-    def get_digit_row(self, digit):
-        """Возвращает номер строки для цифры"""
-        return digit
-
-    def get_sign_row(self, is_positive):
-        """Возвращает строку для знака: 0 = плюс, 1 = минус"""
-        return 0 if is_positive else 1
-
-    def create_neon_buttons(self):
-        """Создает 4 неоновые кнопки"""
-        button_configs = [
-            {"text": "LIST", "pos_hint": {'x': 0.0, 'y': 0.475}, "id": "list", "value": None},
-            {"text": "MIN", "pos_hint": {'x': 0.2, 'y': 0.475}, "id": "min", "value": self.min_value},
-            {"text": "GENERATE", "pos_hint": {'x': 0.0, 'y': 0.075}, "id": "generate", "value": None},
-            {"text": "MAX", "pos_hint": {'x': 0.2, 'y': 0.075}, "id": "max", "value": self.max_value}
-        ]
-
-        for config in button_configs:
-            button = NeonButton(
-                source='assets/images/buttons/neon_button.png',
-                text=config["text"],
-                text_color=(0.2, 0.8, 1, 1),
-                size_hint=(0.25, 0.35),
-                pos_hint=config["pos_hint"],
-                allow_stretch=True,
-                value=config["value"]
-            )
-            button.action_id = config["id"]
-            button.bind(on_press=self.on_button_press_animation)
-            button.bind(on_release=lambda instance, aid=config["id"], txt=config["text"]:
-            self.on_button_release(instance, aid, txt))
-            self.layout.add_widget(button)
-            self.neon_buttons.append(button)
-
-            if config["id"] == "min":
-                self.min_button = button
-                print(f"✅ Создана кнопка MIN с начальным значением {self.min_value}")
-            elif config["id"] == "max":
-                self.max_button = button
-                print(f"✅ Создана кнопка MAX с начальным значением {self.max_value}")
-
-    def update_min_max_buttons(self):
-        """Обновляет текст на кнопках MIN и MAX"""
-        if self.min_button:
-            self.min_button.update_value(self.min_value)
-            print(f"🔄 Вызван update_min_max_buttons: MIN = {self.min_value}")
-        if self.max_button:
-            self.max_button.update_value(self.max_value)
-            print(f"🔄 Вызван update_min_max_buttons: MAX = {self.max_value}")
-
-    def show_number_input_popup(self, action_type, current_value):
-        """Показывает модальное окно для ввода числа"""
-        self.current_action = action_type
-        title = "Введите MIN значение" if action_type == "min" else "Введите MAX значение"
-
-        popup = NumberInputModal(
-            title=title,
-            current_value=current_value,
-            on_submit=self.on_value_submitted
-        )
-        popup.open()
-
-    def on_value_submitted(self, value):
-        """Обработка введенного значения"""
-        print(f"📥 Получено значение {value} для {self.current_action}")
-
-        if self.current_action == "min":
-            if value > self.max_value:
-                self.show_warning(f"MIN не может быть больше MAX!\nТекущий MAX: {self.max_value}")
-                return
-            self.min_value = value
-            self.update_min_max_buttons()
-            print(f"✅ Установлено MIN = {self.min_value}")
-
-            # Визуальный фидбек
-            if self.min_button:
-                anim = Animation(opacity=0.7, duration=0.1) + Animation(opacity=1, duration=0.1)
-                anim.start(self.min_button)
-
-        elif self.current_action == "max":
-            if value < self.min_value:
-                self.show_warning(f"MAX не может быть меньше MIN!\nТекущий MIN: {self.min_value}")
-                return
-            self.max_value = value
-            self.update_min_max_buttons()
-            print(f"✅ Установлено MAX = {self.max_value}")
-
-            # Визуальный фидбек
-            if self.max_button:
-                anim = Animation(opacity=0.7, duration=0.1) + Animation(opacity=1, duration=0.1)
-                anim.start(self.max_button)
-
-        self.current_action = None
-
-    def generate_random_number(self):
-        import random
-
-        if self.min_value > self.max_value:
-            self.show_warning(f"Ошибка: MIN ({self.min_value}) > MAX ({self.max_value})")
-            return None
-
-        if self.min_value == self.max_value:
-            result = self.min_value
-        else:
-            result = random.randint(self.min_value, self.max_value)
-
-        return result
-
-    def show_warning(self, message):
-        from kivy.uix.popup import Popup
-        from kivy.uix.label import Label
-        from kivy.uix.button import Button
-        from kivy.uix.boxlayout import BoxLayout
-
-        layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        layout.add_widget(Label(text=message, font_size=20, halign='center', valign='middle'))
-
-        close_btn = Button(text="OK", size_hint=(1, 0.3))
-        layout.add_widget(close_btn)
-
-        popup = Popup(title="Предупреждение", content=layout, size_hint=(0.7, 0.4))
-        close_btn.bind(on_press=popup.dismiss)
-        popup.open()
-
-    def on_button_press_animation(self, instance):
-        Animation(opacity=0.8, duration=0.05).start(instance)
-
-    def on_button_release(self, instance, action_id, button_text):
-        Animation(opacity=1.0, duration=0.05).start(instance)
-        self.play_click_sound()
-
-        if action_id == "min":
-            print(f"🎲 Нажата кнопка MIN, текущее значение: {self.min_value}")
-            self.show_number_input_popup("min", self.min_value)
-        elif action_id == "max":
-            print(f"🎲 Нажата кнопка MAX, текущее значение: {self.max_value}")
-            self.show_number_input_popup("max", self.max_value)
-        elif action_id == "generate":
-            result = self.generate_random_number()
-            if result is not None:
-                is_positive = result >= 0
-                abs_result = abs(result)
-                result_str = str(abs_result).zfill(9)
-
-                print(f"\n{'=' * 60}")
-                print(f"🎲 Сгенерировано число: {result}")
-                print(f"   Знак: {'+' if is_positive else '-'}")
-                print(f"   Формат (9 цифр): {result_str}")
-
-                # Определяем целевые строки для кнопок
-                target_rows = []
-                for digit_char in result_str:
-                    digit = int(digit_char)
-                    target_rows.append(self.get_digit_row(digit))
-
-                sign_row = self.get_sign_row(is_positive)
-
-                print(f"\n📊 РАСПРЕДЕЛЕНИЕ ПО КНОПКАМ (сверху вниз):")
-                print(f"   Кнопка 1 (ЗНАК): {'+' if is_positive else '-'} -> строка {sign_row}")
-                for i, (char, row) in enumerate(zip(result_str, target_rows)):
-                    print(f"   Кнопка {i + 2}: цифра {char} -> строка {row}")
-                print(f"{'=' * 60}\n")
-
-                self.spin_all_buttons(target_rows, sign_row)
-
-        elif action_id == "list":
-            self.show_warning("Функция LIST будет доступна в следующем обновлении!")
-
-    def play_click_sound(self):
-        try:
-            from kivy.core.audio import SoundLoader
-            sound = SoundLoader.load('assets/sounds/click.wav')
-            if sound:
-                sound.play()
-        except Exception:
-            pass
-
-    def play_back_sound(self):
-        try:
-            from kivy.core.audio import SoundLoader
-            sound = SoundLoader.load('assets/sounds/back.wav')
-            if sound:
-                sound.play()
-        except Exception:
-            pass
-
     def go_to_menu(self):
-        from main import switch_screen
-        switch_screen('menu')
+        """Возврат в меню с восстановлением громкости"""
+        # Возвращаем громкость фоновой музыки до 100%
+        self.sound_manager.fade_to(1.0, duration=0.5)
+
+        # Вызываем родительский метод для перехода
+        super().go_to_menu()
