@@ -320,9 +320,11 @@ class UpdateManager:
         popup.open()
 
 
-class SportsGameApp(App):
+class AlmightyRandomApp(App):
+    """Главный класс приложения Almighty Random"""
+
     def build(self):
-        print("🚀 [App] Запуск приложения")
+        print("🚀 [App] Запуск Almighty Random")
 
         # Настройка окна
         if platform == 'android':
@@ -384,7 +386,7 @@ class SportsGameApp(App):
         # Проверка обновлений
         Clock.schedule_once(lambda dt: self.update_mgr.check_for_updates(False), 5)
 
-        print("✅ [App] Приложение запущено")
+        print("✅ [App] Almighty Random запущено")
         return self.sm
 
     def switch_to_screen(self, screen_name, **kwargs):
@@ -474,8 +476,7 @@ def switch_screen(screen_name, **kwargs):
         app.sm.current = screen_name
 
 
-
 if __name__ == '__main__':
-    print("🎮 Запуск AlmightyRandomApp...")
-    SportsGameApp().run()
+    print("🎮 Запуск Almighty Random...")
+    AlmightyRandomApp().run()
     print("👋 Приложение завершено")

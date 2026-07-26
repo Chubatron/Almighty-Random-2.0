@@ -44,7 +44,7 @@ class MainMenuScreen(Screen):
 
         # Заголовок
         title = Label(
-            text='SELECT AN ITEM',
+            text='TEST YOUR LUCK',
             font_name='assets/fonts/JockeyOne-Regular.ttf',
             font_size='32sp',
             bold=True,
@@ -128,10 +128,11 @@ class MainMenuScreen(Screen):
             ('Dice', 'assets/images/buttons/Dice_button.png', 'dice', self.change_to_game),
             ('Roulette', 'assets/images/buttons/Blue_roulette_button.png', 'intermediate_roulette',
              self.change_to_intermediate_roulette),
-            ('Random', 'assets/images/buttons/Green_random_button.png', 'random', self.change_to_game),
+            ('RandNum', 'assets/images/buttons/Green_random_button.png', 'random', self.change_to_game),
             ('Coin', 'assets/images/buttons/Grey_cent_button.png', 'coin', self.change_to_game),
             ('Quiz', 'assets/images/buttons/Green_quiz_button.png', 'quiz', self.change_to_game),
             ('RSP', 'assets/images/buttons/rsp_button.png', 'rsp', self.change_to_game),
+            ('Team Draw', 'assets/images/buttons/team_draw_button.png', 'team_draw', self.change_to_game),  # Новая кнопка
         ]
 
         # Сетка 4x2

@@ -367,13 +367,30 @@ def sync_file(filepath, device):
     # Копируем во временную папку
     subprocess.run(f"{ADB} -s {device} push {filepath} /data/local/tmp/", shell=True, capture_output=True)
     
+    # Для screens - сохраняем структуру папок
     if filepath.startswith("screens/"):
-        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/{filename} {APP_DIR}/screens/"', shell=True)
-        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {APP_DIR}/screens/{filename}"', shell=True)
+        # Получаем путь относительно папки screens
+        relative_path = filepath[8:]  # убираем "screens/"
+        target_file = f"{APP_DIR}/screens/{relative_path}"
+        target_dir = os.path.dirname(target_file)
+        
+        # Создаём папку на устройстве
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} mkdir -p {target_dir}"', shell=True)
+        
+        # Копируем файл во временную папку
+        subprocess.run(f"{ADB} -s {device} push {filepath} /data/local/tmp/temp_file", shell=True, capture_output=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/temp_file {target_file}"', shell=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {target_file}"', shell=True)
     
     elif filepath.startswith("components/"):
-        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/{filename} {APP_DIR}/components/"', shell=True)
-        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {APP_DIR}/components/{filename}"', shell=True)
+        relative_path = filepath[11:]  # убираем "components/"
+        target_file = f"{APP_DIR}/components/{relative_path}"
+        target_dir = os.path.dirname(target_file)
+        
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} mkdir -p {target_dir}"', shell=True)
+        subprocess.run(f"{ADB} -s {device} push {filepath} /data/local/tmp/temp_file", shell=True, capture_output=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/temp_file {target_file}"', shell=True)
+        subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} chmod 644 {target_file}"', shell=True)
     
     elif filepath.startswith("locales/"):
         subprocess.run(f'{ADB} -s {device} shell "run-as {PACKAGE} cp /data/local/tmp/{filename} {APP_DIR}/locales/"', shell=True)
@@ -715,33 +732,45 @@ def full_update(device):
     return True
 
 def get_all_files():
-    """Собирает все файлы для отслеживания"""
+    """Собирает все файлы для отслеживания (рекурсивно обходит все папки)"""
     files = []
     
     if os.path.exists("main.py"):
         files.append("main.py")
     
+    # Рекурсивно собираем все .py файлы из папки screens
     if os.path.exists("screens"):
-        for f in os.listdir("screens"):
-            if f.endswith(".py") and f != "__init__.py":
-                files.append(f"screens/{f}")
+        for root, dirs, filenames in os.walk("screens"):
+            for filename in filenames:
+                if filename.endswith(".py"):
+                    full_path = os.path.join(root, filename)
+                    relative_path = full_path.replace("\\", "/")
+                    files.append(relative_path)
     
+    # Рекурсивно собираем все файлы из components
     if os.path.exists("components"):
-        for f in os.listdir("components"):
-            if f.endswith(".py") and f != "__init__.py":
-                files.append(f"components/{f}")
+        for root, dirs, filenames in os.walk("components"):
+            for filename in filenames:
+                if filename.endswith(".py"):
+                    full_path = os.path.join(root, filename)
+                    relative_path = full_path.replace("\\", "/")
+                    files.append(relative_path)
     
     if os.path.exists("locales"):
-        for f in os.listdir("locales"):
-            if f.endswith(".json"):
-                files.append(f"locales/{f}")
+        for root, dirs, filenames in os.walk("locales"):
+            for filename in filenames:
+                if filename.endswith(".json"):
+                    full_path = os.path.join(root, filename)
+                    relative_path = full_path.replace("\\", "/")
+                    files.append(relative_path)
     
     if os.path.exists("assets"):
-        for root, dirs, files_list in os.walk("assets"):
-            for f in files_list:
-                if not f.endswith(('.pyc', '.pyo', '.DS_Store')):
-                    full_path = os.path.join(root, f)
-                    files.append(full_path.replace("\\", "/"))
+        for root, dirs, filenames in os.walk("assets"):
+            for filename in filenames:
+                if not filename.endswith(('.pyc', '.pyo', '.DS_Store')):
+                    full_path = os.path.join(root, filename)
+                    relative_path = full_path.replace("\\", "/")
+                    files.append(relative_path)
     
     return files
 

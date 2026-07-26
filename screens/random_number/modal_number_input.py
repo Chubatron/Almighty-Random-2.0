@@ -3,18 +3,16 @@ from kivy.uix.modalview import ModalView
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
-from kivy.uix.scatter import Scatter
 from kivy.uix.image import Image
 from kivy.uix.label import Label
-from kivy.graphics import Color, Rectangle, Ellipse
+from kivy.uix.widget import Widget
+from kivy.graphics import Color, Rectangle, Line
 from kivy.clock import Clock
 from kivy.core.window import Window
+from kivy.utils import platform
 import os
 
 from sound_manager import SoundManager
-
-# Глобальная переменная для хранения позиции Scatter
-SCATTER_POSITION = None
 
 
 class ImageButton(Button):
@@ -30,7 +28,6 @@ class ImageButton(Button):
         self.text_font_size = kwargs.get('font_size', 24)
         self.text_color = kwargs.get('color', (1, 1, 1, 1))
 
-        # Загружаем звук нажатия
         self._click_sound = None
         self._sound_manager = SoundManager()
         self._load_click_sound()
@@ -59,7 +56,6 @@ class ImageButton(Button):
         self.bind(size=self._update_widgets, pos=self._update_widgets)
 
     def _load_click_sound(self):
-        """Загружает звук нажатия кнопки"""
         try:
             from kivy.core.audio import SoundLoader
             sound_path = 'assets/sounds/r_number/set_value.mp3'
@@ -71,7 +67,6 @@ class ImageButton(Button):
             pass
 
     def play_click_sound(self):
-        """Воспроизводит звук нажатия кнопки (проверяет mute)"""
         if self._sound_manager.is_muted():
             return
         if self._click_sound:
@@ -91,29 +86,25 @@ class ImageButton(Button):
             self.text_label.pos = self.pos
 
     def on_press(self):
-        """При нажатии воспроизводим звук"""
         self.play_click_sound()
         super().on_press()
 
 
-class RotatedPopup(ModalView):
-    """Модальное окно с повёрнутым содержимым"""
+class SimpleNumberInputPopup(ModalView):
+    """Попап с полем ввода и кнопкой OK"""
 
     def __init__(self, current_value=0, on_submit=None, **kwargs):
-        global SCATTER_POSITION
-
         super().__init__(**kwargs)
-        self.size_hint = (0.5, 0.5)
+        self.size_hint = (0.7, 0.4)
         self.auto_dismiss = True
         self.on_submit = on_submit
-        self._initialized = False
         self._sound_manager = SoundManager()
 
-        with self.canvas.before:
-            Color(0.2, 0.2, 0.2, 0.95)
-            self.bg_rect = Rectangle(size=self.size, pos=self.pos)
-            self.bind(size=self._update_bg, pos=self._update_bg)
+        # FloatLayout позволяет накладывать элементы друг на друга
+        from kivy.uix.floatlayout import FloatLayout
+        self.layout = FloatLayout()
 
+        # 1. Фоновое изображение - на весь попап
         self.bg_image = Image(
             source='assets/images/popup_bg.png',
             allow_stretch=True,
@@ -121,105 +112,96 @@ class RotatedPopup(ModalView):
             size_hint=(1, 1),
             pos_hint={'x': 0, 'y': 0}
         )
-        self.add_widget(self.bg_image)
+        self.layout.add_widget(self.bg_image)
 
-        self.scatter = Scatter(
-            size_hint=(0.8, 0.6),
-            pos_hint={'center_x': 0.5, 'center_y': 0.5},
-            do_rotation=False,
-            do_scale=False,
-            do_translation=False,
-            rotation=-90
-        )
-
-        SCATTER_POSITION = self.scatter.pos
-
-        self.layout = BoxLayout(
+        # 2. Контейнер для содержимого поверх фона (вертикальный BoxLayout)
+        self.content_layout = BoxLayout(
             orientation='vertical',
-            padding=20,
-            spacing=15,
-            size_hint=(None, None)
+            padding=40,
+            spacing=20,
+            size_hint=(1, 1),
+            pos_hint={'center_x': 0.5, 'center_y': 0.5}
         )
 
+        # РАЗМЕР ШРИФТА ЗАВИСИТ ОТ РАЗМЕРА ПОПАПА
+        popup_width = Window.width * 0.7
+        popup_height = Window.height * 0.4
+
+        text_input_font_size = min(popup_width, popup_height) * 0.15
+        button_font_size = min(popup_width, popup_height) * 0.045
+
+        text_input_font_size = max(24, min(60, text_input_font_size))
+        button_font_size = max(16, min(40, button_font_size))
+
+        # Поле ввода - ПРОЗРАЧНОЕ, виден только курсор и текст
         self.text_input = TextInput(
             text="",
-            font_size=40,
-            size_hint=(1, 0.2),
+            font_size=text_input_font_size,
+            size_hint=(1, 0.6),
             multiline=False,
             input_filter='int',
             halign='center',
-            background_color=(0.15, 0.15, 0.15, 0),
+            padding=(10, 10, 10, 10),
+            background_color=(0, 0, 0, 0),
             foreground_color=(1, 1, 1, 1),
-            cursor_color=(0.2, 0.8, 1, 1)
+            cursor_color=(0.2, 0.8, 1, 1),
+            background_normal='',
+            background_active=''
         )
         self.text_input.bind(text=self.on_text_change)
-        self.layout.add_widget(self.text_input)
+        self.content_layout.add_widget(self.text_input)
 
+        # Кнопка OK (БЕЗ ПОДСВЕТКИ)
         self.submit_btn = ImageButton(
             image_source='assets/images/buttons/Roulette_switch_button.png',
             text="OK",
-            font_size=24,
+            font_size=button_font_size,
             color=(0, 0, 0, 1),
-            size_hint=(1, 0.15)
+            size_hint=(0.4, 0.4),
+            pos_hint={'center_x': 0.5}
         )
         self.submit_btn.bind(on_press=self._on_submit)
-        self.layout.add_widget(self.submit_btn)
+        self.content_layout.add_widget(self.submit_btn)
 
-        self.scatter.add_widget(self.layout)
-        self.add_widget(self.scatter)
+        # Добавляем content_layout поверх bg_image
+        self.layout.add_widget(self.content_layout)
 
-        Clock.schedule_once(self._sync_layout, 0.1)
-        Clock.schedule_once(lambda dt: self._focus_input(), 0.5)
+        self.add_widget(self.layout)
 
-    def _sync_layout(self, dt):
-        global SCATTER_POSITION
+        # Состояние
+        self._last_value = ""
 
-        if hasattr(self, 'scatter') and hasattr(self, 'layout'):
-            self.layout.size = (self.scatter.height, self.scatter.width)
-            global_pos = self.scatter.to_window(0, 0)
-            offset_y = self.scatter.height - self.scatter.width
-            self.layout.pos = (global_pos[0] - offset_y, global_pos[1])
-            SCATTER_POSITION = self.scatter.pos
+        # Фокус на поле ввода
+        Clock.schedule_once(lambda dt: self._focus_input(), 0.3)
 
     def _focus_input(self):
         if hasattr(self, 'text_input'):
             self.text_input.focus = True
 
     def on_text_change(self, instance, value):
-        # Разрешаем пустую строку или просто минус
         if value == '' or value == '-':
             self._last_value = value
             return
 
-        # Проверяем длину: максимум 10 символов (минус + 9 цифр)
         if len(value) > 10:
-            # Возвращаем последнее корректное значение
             if hasattr(self, '_last_value'):
                 self.text_input.text = self._last_value
             return
 
         try:
             num = int(value)
-            # Проверяем диапазон (но не заменяем, просто блокируем ввод)
             if num > 999999999 or num < -999999999:
                 if hasattr(self, '_last_value'):
                     self.text_input.text = self._last_value
                 return
             self._last_value = value
         except ValueError:
-            # Если введено что-то нечисловое (кроме минуса), откатываем
             if hasattr(self, '_last_value'):
                 self.text_input.text = self._last_value
-
-    def _update_bg(self, instance, value):
-        if hasattr(self, 'bg_rect'):
-            self.bg_rect.size = self.size
-            self.bg_rect.pos = self.pos
 
     def _on_submit(self, instance):
         text_value = self.text_input.text.strip()
 
-        # Если поле пустое или только минус - передаём None
         if text_value == '' or text_value == '-':
             print(f"[POPUP] Поле ввода пустое, передаём None")
             if self.on_submit:
@@ -241,10 +223,26 @@ class RotatedPopup(ModalView):
                 self.on_submit(0)
         self.dismiss()
 
+    def on_dismiss(self):
+        """При закрытии popup скрываем клавиатуру"""
+        if platform == 'android':
+            try:
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                InputMethodManager = autoclass('android.view.inputmethod.InputMethodManager')
+                Context = autoclass('android.content.Context')
 
-class SimpleNumberInputPopup(RotatedPopup):
-    pass
+                activity = PythonActivity.mActivity
+                imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE)
+                current_focus = activity.getCurrentFocus()
+
+                if current_focus:
+                    imm.hideSoftInputFromWindow(current_focus.getWindowToken(), 0)
+                    print("[KEYBOARD] Клавиатура скрыта")
+            except Exception as e:
+                print(f"[KEYBOARD] Ошибка скрытия клавиатуры: {e}")
+        super().on_dismiss()
 
 
-class CustomModal(RotatedPopup):
+class CustomModal(SimpleNumberInputPopup):
     pass

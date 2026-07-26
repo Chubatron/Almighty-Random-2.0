@@ -5,7 +5,6 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.label import Label
 from kivy.uix.button import Button
-from kivy.uix.scatter import Scatter
 from kivy.uix.image import Image
 from kivy.graphics import Color, Rectangle, Line
 from kivy.clock import Clock
@@ -280,87 +279,14 @@ class DebugPopup(Popup):
         return super().on_touch_down(touch)
 
 
-class RotatedButton(Button):
-    """Кнопка с корректной обработкой касаний при повороте на -90 градусов"""
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-        self.debug_overlay = RelativeLayout(
-            size_hint=(1, 1),
-            pos_hint={'center_x': 0.5, 'center_y': 0.5}
-        )
-
-        self.debug_rect_coords = (0, 0, self.debug_overlay.width, self.debug_overlay.height)
-
-        with self.debug_overlay.canvas.before:
-            self.debug_color = Color(0, 1, 1, 0.3)
-            self.debug_bg = Rectangle(
-                pos=(0, 0),
-                size=self.debug_overlay.size
-            )
-
-        with self.debug_overlay.canvas.after:
-            self.debug_border_color = Color(1, 1, 0, 1)
-            self.debug_rect = Line(
-                rectangle=self.debug_rect_coords,
-                width=3
-            )
-
-        self.debug_overlay.bind(size=self._update_debug_overlay, pos=self._update_debug_overlay)
-        self.debug_overlay.bind(size=self._update_debug_rect, pos=self._update_debug_rect)
-
-        self.add_widget(self.debug_overlay)
-        self._sound_manager = SoundManager()
-
-    def _update_debug_overlay(self, *args):
-        if hasattr(self, 'debug_bg'):
-            self.debug_bg.size = self.debug_overlay.size
-
-    def _update_debug_rect(self, *args):
-        if hasattr(self, 'debug_rect'):
-            self.debug_rect_coords = (0, 0, self.debug_overlay.width, self.debug_overlay.height)
-            self.debug_rect.rectangle = self.debug_rect_coords
-
-    def on_touch_down(self, touch):
-        print(f"[DEBUG BUTTON] RotatedButton {self.text} - on_touch_down вызван")
-        if hasattr(self, 'debug_color'):
-            self.debug_color.rgba = (0, 1, 0, 0.5)
-        return super().on_touch_down(touch)
-
-    def on_touch_up(self, touch):
-        print(f"[DEBUG BUTTON] RotatedButton {self.text} - on_touch_up вызван")
-        if hasattr(self, 'debug_color'):
-            self.debug_color.rgba = (0, 1, 1, 0.3)
-        return super().on_touch_up(touch)
-
-    def get_rect_global(self):
-        """Возвращает глобальные координаты желтого прямоугольника"""
-        x1, y1 = self.debug_overlay.to_window(0, 0)
-        x2, y2 = self.debug_overlay.to_window(self.debug_overlay.width, self.debug_overlay.height)
-
-        min_x = min(x1, x2)
-        max_x = max(x1, x2)
-        min_y = min(y1, y2)
-        max_y = max(y1, y2)
-
-        return min_x, min_y, max_x, max_y
-
-    def collide_point(self, x, y):
-        """Проверка попадания по желтому прямоугольнику"""
-        min_x, min_y, max_x, max_y = self.get_rect_global()
-        result = (min_x <= x <= max_x and min_y <= y <= max_y)
-
-        print(f"[DEBUG COLLIDE] Кнопка: {self.text}")
-        print(f"  Желтый прямоугольник: x={min_x:.2f}..{max_x:.2f}, y={min_y:.2f}..{max_y:.2f}")
-        print(f"  Точка касания: ({x:.2f}, {y:.2f})")
-        print(f"  Результат: {result}")
-
-        return result
-
-
 class HistoryPopup(DebugPopup):
-    """Window to display number history (rotated 90 degrees)"""
+    """Window to display number history (НЕ ПОВЁРНУТЫЙ)"""
+
+    # Коэффициенты для адаптивного размера кнопок
+    BUTTON_HEIGHT_COEFF = 0.07    # 7% от высоты экрана
+    BUTTON_WIDTH_COEFF = 0.25     # 25% от ширины экрана (каждая кнопка)
+    BUTTON_SPACING_COEFF = 0.02   # 2% от ширины экрана (отступ между кнопками)
+    BUTTONS_PADDING_COEFF = 0.05  # 5% от ширины экрана (отступы по бокам)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -394,31 +320,16 @@ class HistoryPopup(DebugPopup):
         else:
             print(f"[DEBUG HISTORY] Файл фона не найден: {background_file}")
 
-        self.scatter = Scatter(
-            size_hint=(1, 1),
-            pos_hint={'x': 0, 'y': 0},
-            do_rotation=False,
-            do_scale=False,
-            do_translation=False,
-            rotation=-90,
-            opacity=0.85
-        )
+        # УБРАН Scatter с поворотом - теперь обычный вертикальный layout
+        self.layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
+        self.layout.size_hint = (1, 1)
 
-        print(f"[DEBUG HISTORY] Scatter создан: rotation={self.scatter.rotation}, opacity={self.scatter.opacity}")
-
-        self.layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        self.layout.size_hint = (None, None)
-
-        with self.layout.canvas.before:
-            Color(0, 0, 0, 0)
-            self.layout_bg = Rectangle(pos=self.layout.pos, size=self.layout.size)
-            self.layout.bind(pos=self._update_layout_bg, size=self._update_layout_bg)
-
+        # ScrollView для прокрутки
         scroll = ScrollView(
             size_hint=(1, 1),
-            bar_width=0,
-            bar_color=(0, 0, 0, 0),
-            bar_inactive_color=(0, 0, 0, 0),
+            bar_width=10,
+            bar_color=(0.5, 0.5, 0.5, 0.5),
+            bar_inactive_color=(0.3, 0.3, 0.3, 0.3),
             scroll_type=['bars', 'content'],
             do_scroll_x=False,
             do_scroll_y=True
@@ -440,20 +351,42 @@ class HistoryPopup(DebugPopup):
         scroll.add_widget(self.content_layout)
         self.layout.add_widget(scroll)
 
-        buttons_layout = BoxLayout(orientation='horizontal', size_hint=(1, None), height=50, spacing=10)
+        # ===== КНОПКИ УПРАВЛЕНИЯ =====
+        screen_width = Window.width
+        screen_height = Window.height
+
+        # Рассчитываем размеры кнопок относительно экрана
+        btn_height = screen_height * self.BUTTON_HEIGHT_COEFF
+        spacing = screen_width * self.BUTTON_SPACING_COEFF
+        padding = screen_width * self.BUTTONS_PADDING_COEFF
+
+        # Ширина кнопки: (ширина экрана - отступы слева/справа - отступ между кнопками) / 2
+        available_width = screen_width - (padding * 2) - spacing
+        btn_width = available_width / 2
+
+        # Создаем контейнер для кнопок с адаптивной высотой
+        self.buttons_layout = BoxLayout(
+            orientation='horizontal',
+            size_hint=(1, None),
+            height=btn_height,
+            spacing=spacing,
+            padding=[padding, 0, padding, 0]  # [left, top, right, bottom]
+        )
 
         if os.path.exists(BUTTON_IMAGE_PATH):
             print(f"[DEBUG HISTORY] Изображение для кнопок найдено: {BUTTON_IMAGE_PATH}")
 
             self.clear_btn = ImageButton(
                 text="CLEAR",
-                size_hint=(1, 1)
+                size_hint=(None, 1),  # Фиксированная ширина, растягивается по высоте
+                width=btn_width
             )
             self.clear_btn.bind(on_press=self.clear_history)
 
             self.close_btn = ImageButton(
                 text="CLOSE",
-                size_hint=(1, 1)
+                size_hint=(None, 1),
+                width=btn_width
             )
             self.close_btn.bind(on_press=self.on_close_press)
 
@@ -461,41 +394,39 @@ class HistoryPopup(DebugPopup):
             print(f"[DEBUG HISTORY] Изображение для кнопок НЕ НАЙДЕНО: {BUTTON_IMAGE_PATH}")
             print(f"[DEBUG HISTORY] Использую стандартные кнопки с текстом")
 
-            self.clear_btn = RotatedButton(
+            self.clear_btn = Button(
                 text="CLEAR",
-                font_size=20,
+                font_size=btn_height * 0.4,
+                size_hint=(None, 1),
+                width=btn_width,
                 background_color=(0.8, 0.2, 0.2, 0.7),
                 color=(1, 1, 1, 1)
             )
             self.clear_btn.bind(on_press=self.clear_history)
 
-            self.close_btn = RotatedButton(
+            self.close_btn = Button(
                 text="CLOSE",
-                font_size=20,
+                font_size=btn_height * 0.4,
+                size_hint=(None, 1),
+                width=btn_width,
                 background_color=(0.2, 0.6, 0.2, 0.7),
                 color=(1, 1, 1, 1)
             )
             self.close_btn.bind(on_press=self.on_close_press)
 
-        buttons_layout.add_widget(self.clear_btn)
-        buttons_layout.add_widget(self.close_btn)
-        self.layout.add_widget(buttons_layout)
+        self.buttons_layout.add_widget(self.clear_btn)
+        self.buttons_layout.add_widget(self.close_btn)
+        self.layout.add_widget(self.buttons_layout)
 
-        self.scatter.add_widget(self.layout)
-        main_layout.add_widget(self.scatter)
+        main_layout.add_widget(self.layout)
         self.add_widget(main_layout)
 
-        self.scatter.bind(size=self._adjust_layout_size)
-
         print(f"[DEBUG HISTORY] Popup создан, size_hint={self.size_hint}")
+        print(f"[DEBUG HISTORY] Размер кнопок: {btn_width}x{btn_height}")
+        print(f"[DEBUG HISTORY] Отступы: spacing={spacing}, padding={padding}")
 
         Clock.schedule_once(lambda dt: self.load_history(), 0.2)
         Clock.schedule_once(self._print_debug_info, 0.3)
-
-    def _update_layout_bg(self, *args):
-        if hasattr(self, 'layout_bg') and self.layout:
-            self.layout_bg.pos = self.layout.pos
-            self.layout_bg.size = self.layout.size
 
     def _update_scroll_bg(self, *args):
         if hasattr(self, 'scroll_bg') and hasattr(self, 'layout'):
@@ -517,14 +448,11 @@ class HistoryPopup(DebugPopup):
 
     def on_close_press(self, instance):
         print(f"[DEBUG HISTORY] НАЖАТА КНОПКА CLOSE - ЗАКРЫВАЮ POPUP")
-        # Воспроизводим звук (проверяет mute внутри)
         self.play_click_sound()
-        # Закрываем попап
         self.dismiss()
 
     def clear_history(self, instance):
         print(f"[DEBUG HISTORY] НАЖАТА КНОПКА CLEAR - ВЫПОЛНЯЮ ОЧИСТКУ")
-        # Воспроизводим звук (проверяет mute внутри)
         self.play_click_sound()
 
         try:
@@ -559,25 +487,6 @@ class HistoryPopup(DebugPopup):
         except Exception as e:
             print(f"[DEBUG HISTORY] Ошибка сброса счётчика: {e}")
 
-    def _adjust_layout_size(self, instance, value):
-        if hasattr(self, 'layout'):
-            visual_width = self.scatter.height
-            visual_height = self.scatter.width
-
-            layout_x = (self.scatter.width - visual_width) / 2
-            layout_y = (self.scatter.height - visual_height) / 2
-
-            offset_y = self.scatter.height - self.scatter.width
-            layout_y = layout_y - offset_y / 2
-            layout_x = layout_y - offset_y
-
-            self.layout.size = (visual_width, visual_height)
-            self.layout.pos = (layout_x, layout_y)
-
-            print(f"[DEBUG HISTORY] Adjusted layout: size={self.layout.size}, pos={self.layout.pos}")
-            print(f"[DEBUG HISTORY] Scatter: size={self.scatter.size}")
-            print(f"[DEBUG HISTORY] Offset Y: {offset_y}")
-
     def _print_debug_info(self, dt):
         print(f"[DEBUG HISTORY] ===== ПОЗИЦИИ ВИДЖЕТОВ =====")
         print(f"[DEBUG HISTORY] Размер окна: {Window.width} x {Window.height}")
@@ -587,14 +496,11 @@ class HistoryPopup(DebugPopup):
         if hasattr(self, 'bg_image') and self.bg_image:
             print(f"[DEBUG HISTORY] BG Image size: {self.bg_image.size}, pos: {self.bg_image.pos}")
 
-        if hasattr(self, 'scatter') and self.scatter:
-            print(f"[DEBUG HISTORY] Scatter size: {self.scatter.size}, pos: {self.scatter.pos}")
-            print(f"[DEBUG HISTORY] Scatter center: {self.scatter.center}")
-            print(f"[DEBUG HISTORY] Scatter rotation: {self.scatter.rotation}")
-            print(f"[DEBUG HISTORY] Scatter opacity: {self.scatter.opacity}")
-
         if hasattr(self, 'layout') and self.layout:
             print(f"[DEBUG HISTORY] Layout size: {self.layout.size}, pos: {self.layout.pos}")
+
+        if hasattr(self, 'buttons_layout') and self.buttons_layout:
+            print(f"[DEBUG HISTORY] Buttons Layout: pos={self.buttons_layout.pos}, size={self.buttons_layout.size}")
 
         if hasattr(self, 'clear_btn') and self.clear_btn:
             print(f"[DEBUG HISTORY] Clear button: pos={self.clear_btn.pos}, size={self.clear_btn.size}")
