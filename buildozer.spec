@@ -9,6 +9,11 @@ source.include_patterns = assets/*, screens/*, components/*, locales/*
 source.exclude_dirs = .buildozer,.venv,__pycache__,bin
 version = 1.0.1
 orientation = portrait
+
+# ========== ИКОНКА ПРИЛОЖЕНИЯ (обычная) ==========
+icon.filename = assets/app_icon.png
+# ==================================================
+
 requirements = python3,kivy==2.3.0,requests,numpy,chardet,charset_normalizer,pillow,android,sdl2,pyjnius,plyer
 android.permissions = INTERNET, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, VIBRATE
 android.api = 33

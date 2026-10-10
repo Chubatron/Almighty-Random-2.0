@@ -6,7 +6,7 @@ import threading
 import importlib
 from kivy.app import App
 from kivy.clock import Clock
-from kivy.uix.screenmanager import ScreenManager, FadeTransition
+from kivy.uix.screenmanager import ScreenManager, Screen, FadeTransition
 from kivy.core.window import Window
 from kivy.utils import platform
 from kivy.uix.popup import Popup
@@ -17,26 +17,27 @@ from kivy.uix.boxlayout import BoxLayout
 
 # --- ФУНКЦИЯ ДЛЯ ДИНАМИЧЕСКОГО ИМПОРТА ЭКРАНА ---
 def get_screen_class(screen_name, screen_file, class_name):
-    """Динамически импортирует класс экрана, всегда загружая свежую версию"""
+    """Динамически импортирует класс экрана, всегда загружая свежую версию.
+
+    screen_file может быть как 'menu_screen', так и 'draw.draw_main' —
+    importlib корректно разберёт вложенные пути.
+    """
     try:
-        # Полное имя модуля
         module_name = f"screens.{screen_file}"
 
-        # Удаляем модуль из кэша если он там есть
         if module_name in sys.modules:
             del sys.modules[module_name]
             print(f"   🗑️ Удален из кэша: {module_name}")
 
-        # Импортируем модуль заново
         module = importlib.import_module(module_name)
-
-        # Получаем класс
         screen_class = getattr(module, class_name)
 
         print(f"   ✅ Загружен экран: {screen_name}")
         return screen_class
     except Exception as e:
         print(f"   ❌ Ошибка загрузки {screen_name}: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -81,6 +82,7 @@ if platform == 'android':
 # Импорты менеджеров (они редко меняются)
 from language_manager import LanguageManager
 from sound_manager import SoundManager
+from lucky_token import LuckyToken
 
 
 def get_settings_path():
@@ -323,10 +325,15 @@ class UpdateManager:
 class AlmightyRandomApp(App):
     """Главный класс приложения Almighty Random"""
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # ✅ Флаг: приложение завершается. Используется экранами,
+        # чтобы не возвращать громкость музыки при закрытии.
+        self._is_stopping = False
+
     def build(self):
         print("🚀 [App] Запуск Almighty Random")
 
-        # Настройка окна
         if platform == 'android':
             Window.fullscreen = 'auto'
         else:
@@ -334,23 +341,22 @@ class AlmightyRandomApp(App):
 
         Window.clearcolor = (0.1, 0.1, 0.1, 1)
 
-        # Параметры экрана
         self.screen_params = ScreenParams()
 
-        # Инициализация менеджеров
         print("🔧 [App] Инициализация менеджеров")
         self.lang = LanguageManager()
         self.sound_mgr = SoundManager()
+        self.tokens = LuckyToken()
         self.update_mgr = UpdateManager(self)
 
-        # Загружаем сохраненное состояние звука
+        print(f"🎟️ [App] Lucky_Token готов. Баланс: {self.tokens.get_balance()}")
+
         if load_mute_state():
             self.sound_mgr.mute()
             print(f"🔇 [App] Звук ВЫКЛЮЧЕН")
         else:
             print(f"🔊 [App] Звук ВКЛЮЧЕН")
 
-        # Звук
         try:
             sound_path = "assets/sounds/background.wav"
             if os.path.exists(sound_path):
@@ -361,10 +367,8 @@ class AlmightyRandomApp(App):
         except Exception as e:
             print(f"❌ [App] Ошибка звука: {e}")
 
-        # Создаем ScreenManager
         self.sm = ScreenManager(transition=FadeTransition(duration=0.4))
 
-        # Загружаем меню (его тоже динамически)
         menu_class = get_screen_class('menu', 'menu_screen', 'MainMenuScreen')
         if menu_class:
             menu = menu_class(name='menu', screen_params=self.screen_params)
@@ -372,18 +376,16 @@ class AlmightyRandomApp(App):
             print("✅ [App] Создано меню")
         else:
             print("❌ [App] Ошибка: не удалось загрузить меню")
-            # Создаем заглушку
-            from kivy.uix.label import Label
-            self.sm.add_widget(Label(text="Ошибка загрузки меню"))
+            error_screen = Screen(name='error')
+            error_screen.add_widget(Label(text="Ошибка загрузки меню"))
+            self.sm.add_widget(error_screen)
 
-        # Запуск музыки
         def start_music(dt):
             if not self.sound_mgr.is_muted():
                 self.sound_mgr.play()
 
         Clock.schedule_once(start_music, 0.5)
 
-        # Проверка обновлений
         Clock.schedule_once(lambda dt: self.update_mgr.check_for_updates(False), 5)
 
         print("✅ [App] Almighty Random запущено")
@@ -391,9 +393,13 @@ class AlmightyRandomApp(App):
 
     def switch_to_screen(self, screen_name, **kwargs):
         """Переключает на экран - ВСЕГДА загружает СВЕЖУЮ версию из файла"""
+        # ✅ Если приложение завершается — не переключаем экраны
+        if self._is_stopping:
+            print(f"⚠️ [App] switch_to_screen('{screen_name}') пропущен — приложение завершается")
+            return
+
         print(f"🔄 [App] Переключение на {screen_name}")
 
-        # Карта соответствия: имя_экрана -> (имя_файла, имя_класса)
         screen_map = {
             'menu': ('menu_screen', 'MainMenuScreen'),
             'random_number': ('random_number_screen', 'RandomNumberScreen'),
@@ -406,6 +412,7 @@ class AlmightyRandomApp(App):
             'magic_ball': ('magic_ball_screen', 'MagicBallScreen'),
             'rsp': ('rsp_screen', 'RSPScreen'),
             'intermediate_roulette': ('intermediate_roulette', 'IntermediateRoulette'),
+            'team_draw': ('draw.draw_main', 'DrawScreen'),
         }
 
         if screen_name not in screen_map:
@@ -414,7 +421,6 @@ class AlmightyRandomApp(App):
 
         file_name, class_name = screen_map[screen_name]
 
-        # ВСЕГДА загружаем свежую версию экрана
         print(f"   📂 Загрузка свежей версии {file_name}.py...")
         screen_class = get_screen_class(screen_name, file_name, class_name)
 
@@ -422,13 +428,11 @@ class AlmightyRandomApp(App):
             print(f"❌ Не удалось загрузить экран {screen_name}")
             return
 
-        # Удаляем старый экран если есть
         if self.sm.has_screen(screen_name):
             old_screen = self.sm.get_screen(screen_name)
             self.sm.remove_widget(old_screen)
             print(f"   🗑️ Удален старый экран {screen_name}")
 
-        # Создаем новый экран
         try:
             new_screen = screen_class(name=screen_name, screen_params=self.screen_params, **kwargs)
             self.sm.add_widget(new_screen)
@@ -439,7 +443,6 @@ class AlmightyRandomApp(App):
             traceback.print_exc()
             return
 
-        # Переключаемся
         self.sm.current = screen_name
         print(f"✅ Переключено на {screen_name}")
 
@@ -456,12 +459,37 @@ class AlmightyRandomApp(App):
     def on_resume(self):
         print("📱 [App] on_resume - приложение восстановлено")
 
+        # ✅ Если приложение находится в процессе завершения — не запускаем звук
+        if self._is_stopping:
+            print("🔊 [App] on_resume: приложение завершается, звук не запускаем")
+            return
+
         if hasattr(self, 'sound_mgr'):
             if not self.sound_mgr.is_muted():
                 self.sound_mgr.play()
 
         if hasattr(self, 'update_mgr'):
             Clock.schedule_once(lambda dt: self.update_mgr.check_for_updates(False), 2)
+
+    def on_stop(self):
+        """✅ Вызывается при закрытии приложения.
+        Жёстко останавливаем музыку, чтобы не было всплеска громкости."""
+        print("🛑 [App] on_stop — приложение закрывается")
+
+        self._is_stopping = True
+
+        if hasattr(self, 'sound_mgr') and self.sound_mgr:
+            try:
+                self.sound_mgr.hard_stop()
+            except Exception as e:
+                print(f"⚠️ [App] Ошибка hard_stop: {e}")
+
+        try:
+            Clock.unschedule_all()
+        except Exception:
+            pass
+
+        print("👋 [App] Ресурсы освобождены")
 
     def _(self, key):
         return self.lang._(key)

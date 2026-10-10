@@ -33,7 +33,7 @@ class MagneticField:
 
         # Параметры полей кубиков
         # БОЛЬШОЕ поле кубика (для взаимодействия со стаканом)
-        self.DICE_BIG_COLLIDER_RADIUS_MULTIPLIER = 0.4  # Радиус = размер кубика * 0.4
+        self.DICE_BIG_COLLIDER_RADIUS_MULTIPLIER = 0.5  # Радиус = размер кубика * 0.4
         # МАЛЕНЬКОЕ поле кубика (для взаимодействия между кубиками)
         self.DICE_SMALL_COLLIDER_RADIUS_MULTIPLIER = 0.25  # Радиус = размер кубика * 0.25
 

@@ -16,27 +16,25 @@ from kivy.vector import Vector
 from kivy.graphics import Color, Rectangle, Ellipse, Translate, PushMatrix, PopMatrix
 from kivy.graphics.texture import Texture
 from kivy.core.text import Label as CoreLabel
+from kivy.core.audio import SoundLoader
 from PIL import Image as PILImage
 import numpy as np
 from screens.base_game_screen import BaseGameScreen
+
+from components.token_widget import TokenWidget
+from lucky_token import LuckyToken
 
 
 class LensEffect(Widget):
     """Эффект линзы (искажение фона)"""
 
     def __init__(self, size_ratio, speed=1.0, amplitude=10, **kwargs):
-        """
-        size_ratio: размер линзы относительно мяча (0.5, 0.33, 0.2)
-        speed: скорость движения
-        amplitude: амплитуда движения
-        """
         super().__init__(**kwargs)
         self.size_ratio = size_ratio
         self.speed = speed
         self.amplitude = amplitude
         self.angle = random.uniform(0, 360)
 
-        # Параметры линзы
         self.lens_size = 0
         self.lens_x = 0
         self.lens_y = 0
@@ -44,13 +42,10 @@ class LensEffect(Widget):
         self.bind(pos=self._update_lens, size=self._update_lens)
 
     def update_position(self, ball_center_x, ball_center_y, ball_size, dt):
-        """Обновляет позицию линзы относительно мяча"""
-        # Движение по эллипсу вокруг мяча
         self.angle += self.speed * dt * 50
         if self.angle > 360:
             self.angle -= 360
 
-        # Радиус движения зависит от размера линзы
         radius = ball_size * (0.5 + self.size_ratio)
 
         offset_x = math.cos(math.radians(self.angle)) * radius * 0.8
@@ -63,7 +58,6 @@ class LensEffect(Widget):
         self._update_lens()
 
     def _update_lens(self, *args):
-        """Обновляет позицию и размер виджета линзы"""
         if self.lens_size > 0:
             self.size = (self.lens_size, self.lens_size)
             self.pos = (self.lens_x - self.lens_size / 2,
@@ -80,19 +74,16 @@ class LensCanvas(Widget):
         self.ball_size = 0
 
     def add_lens(self, lens):
-        """Добавляет линзу для отрисовки"""
         self.lenses.append(lens)
         self.add_widget(lens)
 
     def clear_lenses(self):
-        """Очищает все линзы"""
         for lens in self.lenses:
             if lens.parent:
                 self.remove_widget(lens)
         self.lenses.clear()
 
     def update_lenses(self, ball_center_x, ball_center_y, ball_size, dt):
-        """Обновляет позиции всех линз"""
         self.ball_pos = (ball_center_x, ball_center_y)
         self.ball_size = ball_size
 
@@ -100,7 +91,6 @@ class LensCanvas(Widget):
             lens.update_position(ball_center_x, ball_center_y, ball_size, dt)
 
     def draw_lenses(self, bg_texture=None):
-        """Отрисовывает линзы с эффектом искажения на фоне"""
         self.canvas.clear()
 
         if not bg_texture:
@@ -111,14 +101,8 @@ class LensCanvas(Widget):
                 if lens.lens_size > 0:
                     PushMatrix()
                     Translate(lens.lens_x, lens.lens_y)
-
-                    # Создаём эффект увеличения/искажения
-                    scale_factor = 1.0 + (lens.size_ratio * 0.8)
-
-                    # Пропорциональное увеличение
                     Translate(-lens.lens_x, -lens.lens_y)
 
-                    # Рисуем увеличенную область
                     src_x = lens.lens_x - lens.lens_size / 2
                     src_y = lens.lens_y - lens.lens_size / 2
 
@@ -127,14 +111,8 @@ class LensCanvas(Widget):
                         texture=bg_texture,
                         pos=(src_x, src_y),
                         size=(lens.lens_size, lens.lens_size),
-                        tex_coords=(
-                            0, 0,
-                            1, 0,
-                            1, 1,
-                            0, 1
-                        )
+                        tex_coords=(0, 0, 1, 0, 1, 1, 0, 1)
                     )
-
                     PopMatrix()
 
 
@@ -182,10 +160,8 @@ class SpriteSheetBall(Widget):
             shadow_scale=self._update_display
         )
 
-        # Для хранения активной анимации тени
         self._current_shadow_anim = None
 
-        # Устанавливаем базовую тень
         self.shadow_offset_x = self.base_shadow_offset_x
         self.shadow_offset_y = self.base_shadow_offset_y
 
@@ -314,12 +290,10 @@ class SpriteSheetBall(Widget):
         return (x - center_x) ** 2 + (y - center_y) ** 2 <= radius ** 2
 
     def reset_shadow(self):
-        """Сбрасывает параметры тени к базовым и останавливает анимацию тени"""
         if self._current_shadow_anim:
             self._current_shadow_anim.cancel(self)
             self._current_shadow_anim = None
 
-        # Отменяем все анимации на этом виджете
         Animation.cancel_all(self)
 
         self.shadow_offset_x = self.base_shadow_offset_x
@@ -329,7 +303,6 @@ class SpriteSheetBall(Widget):
         self.shadow_alpha = 0.5
 
     def stop_all_animations(self):
-        """Останавливает все анимации на виджете"""
         Animation.cancel_all(self)
         if self._current_shadow_anim:
             self._current_shadow_anim.cancel(self)
@@ -393,15 +366,11 @@ class BallPhysics:
         if bounced and self.sound_callback:
             self.sound_callback(bounce_speed)
 
-        # ВИБРАЦИЯ ПРИ ЛЮБОМ ОТСКОКЕ (без ограничения по скорости)
         if bounced and self.vibration_callback:
-            # Базовая вибрация даже для очень медленных отскоков
             if bounce_speed <= 5:
-                vibration_duration = 0.02  # короткая, но ощутимая вибрация (20 мс)
+                vibration_duration = 0.02
             else:
-                # Чем сильнее удар, тем длиннее вибрация (от 30 до 80 мс)
                 vibration_duration = min(0.03 + (bounce_speed / 60) * 0.05, 0.08)
-
             self.vibration_callback(vibration_duration)
 
         return bounced
@@ -549,6 +518,7 @@ class MagicBallScreen(BaseGameScreen):
     background_path = StringProperty('assets/backgrounds/football_bg.jpg')
     sprite_sheet_path = StringProperty('assets/sprites/sprites_football_ball.png')
     bounce_sound_path = StringProperty('assets/sounds/football_bounce.wav')
+    reject_sound_path = StringProperty('assets/sounds/reject.mp3')
 
     def __init__(self, **kwargs):
         self.screen_params = kwargs.pop('screen_params', None)
@@ -581,6 +551,7 @@ class MagicBallScreen(BaseGameScreen):
         self.is_moving = False
         self.animation_counter = 0
         self.bounce_sound = None
+        self.reject_sound = None
         self.last_velocity = Vector(0, 0)
         self.is_stopping = False
 
@@ -605,21 +576,41 @@ class MagicBallScreen(BaseGameScreen):
         self.shadow_timer = 0
         self._current_shadow_anim = None
 
-        # Система линз
         self.lens_canvas = None
         self.lenses = []
 
+        # --- Жетон ---
+        self.tokens = LuckyToken()
+        self.token_widget = None
+
         self._load_bounce_sound()
+        self._load_reject_sound()
 
     def _load_bounce_sound(self):
-        from kivy.core.audio import SoundLoader
         if os.path.exists(self.bounce_sound_path):
             self.bounce_sound = SoundLoader.load(self.bounce_sound_path)
             if self.bounce_sound:
                 self.bounce_sound.volume = 0.7
 
+    def _load_reject_sound(self):
+        if os.path.exists(self.reject_sound_path):
+            self.reject_sound = SoundLoader.load(self.reject_sound_path)
+            if self.reject_sound:
+                self.reject_sound.volume = 0.8
+
+    def _play_reject_sound(self):
+        """Звук отказа — играет, когда нет жетонов."""
+        if self.sound_manager.is_muted():
+            return
+        if self.reject_sound:
+            try:
+                if self.reject_sound.state == 'play':
+                    self.reject_sound.stop()
+                self.reject_sound.play()
+            except Exception:
+                pass
+
     def _play_bounce_sound(self, speed=0):
-        # Проверяем, не выключен ли звук глобально
         if self.sound_manager.is_muted():
             return
 
@@ -636,11 +627,9 @@ class MagicBallScreen(BaseGameScreen):
                 pass
 
     def _play_bounce_vibration(self, duration=0.03):
-        """Вибрация при отскоке мяча"""
         self.vibrate(duration)
 
     def _play_impact_sound(self):
-        # Проверяем, не выключен ли звук глобально
         if self.sound_manager.is_muted():
             return
 
@@ -653,7 +642,6 @@ class MagicBallScreen(BaseGameScreen):
                 pass
 
     def _stop_all_animations(self):
-        """Останавливает все анимации и сбрасывает параметры тени"""
         if self.ball:
             self.ball.stop_all_animations()
             self.ball.reset_shadow()
@@ -683,7 +671,6 @@ class MagicBallScreen(BaseGameScreen):
         return (random_x, random_y)
 
     def _clear_old_ball(self):
-        """Полностью удаляет старый мяч"""
         if self.ball:
             self._stop_all_animations()
             if self.ball.parent:
@@ -752,11 +739,29 @@ class MagicBallScreen(BaseGameScreen):
                 )
                 self._current_shadow_anim.start(self.ball)
 
+    # ==================== ПЕРЕСТАНОВКА ВИДЖЕТОВ ====================
+
+    def _bring_ball_to_front(self):
+        if self.ball and self.ball.parent:
+            self.layout.remove_widget(self.ball)
+            self.layout.add_widget(self.ball)
+
+    def _send_ball_to_back(self):
+        if self.ball and self.ball.parent:
+            self.layout.remove_widget(self.ball)
+            self.layout.add_widget(self.ball, index=1)
+
+    def _bring_token_to_front(self):
+        if self.token_widget and self.token_widget.parent:
+            self.layout.remove_widget(self.token_widget)
+            self.layout.add_widget(self.token_widget)
+
+    # =========================================================
+
     def _animate_ball_fall(self):
         self.input_enabled = False
         self.is_falling_animation = True
 
-        screen_height = self.layout.height
         target_y = -self.ball.height
 
         total_frames = 12
@@ -783,9 +788,14 @@ class MagicBallScreen(BaseGameScreen):
         self.waiting_for_touch = True
         self.input_enabled = True
 
+        self._send_ball_to_back()
+        self._bring_token_to_front()
+
     def _animate_ball_roll_in(self):
         self.input_enabled = False
         self.is_rolling_animation = True
+
+        self._send_ball_to_back()
 
         if self.answer_label and self.answer_label.parent:
             self.answer_label.hide_answer()
@@ -801,11 +811,7 @@ class MagicBallScreen(BaseGameScreen):
         target_x = target_pos[0]
         target_y = target_pos[1]
 
-        screen_width = self.layout.width
-        start_y = -self.ball.height
-        start_x = target_x
-
-        self.ball.pos = (start_x, start_y)
+        self.ball.pos = (target_x, -self.ball.height)
 
         total_frames = 12
         self.roll_frame_counter = 0
@@ -867,6 +873,8 @@ class MagicBallScreen(BaseGameScreen):
         if self.physics:
             self.physics.deactivate()
 
+        self._bring_ball_to_front()
+
         self.zoom_animation_scheduled = False
         self.is_zoom_animation = True
         self.zoom_animation_counter = 0
@@ -919,8 +927,6 @@ class MagicBallScreen(BaseGameScreen):
             self.ball.frame_index = 10
 
             self._play_impact_sound()
-
-            # Длинная вибрация при завершении анимации
             self.vibrate_long()
 
             self.is_zoom_animation = False
@@ -929,19 +935,16 @@ class MagicBallScreen(BaseGameScreen):
             Clock.schedule_once(lambda dt: self._show_random_answer(), 0.1)
 
     def _update_lenses(self, dt):
-        """Обновляет позиции линз"""
         if self.ball and self.lens_canvas and self.is_moving:
             ball_center = self.ball.get_ball_center()
             self.lens_canvas.update_lenses(ball_center[0], ball_center[1], self.ball_size, dt)
 
     def _create_lenses(self):
-        """Создаёт три линзы разного размера"""
         self.lens_canvas = LensCanvas()
         self.layout.add_widget(self.lens_canvas)
 
-        # Линзы: 1/2, 1/3, 1/5 размера мяча
         lens_sizes = [0.5, 0.33, 0.2]
-        lens_speeds = [0.8, 1.2, 1.5]  # разные скорости движения
+        lens_speeds = [0.8, 1.2, 1.5]
 
         for i, (size_ratio, speed) in enumerate(zip(lens_sizes, lens_speeds)):
             lens = LensEffect(
@@ -952,13 +955,91 @@ class MagicBallScreen(BaseGameScreen):
             self.lens_canvas.add_lens(lens)
             self.lenses.append(lens)
 
-        # Запускаем обновление линз
         Clock.schedule_interval(self._update_lenses, 1 / 60.0)
+
+    # ==================== ЖЕТОН ====================
+
+    def _create_token_widget(self):
+        if self.token_widget and self.token_widget.parent:
+            return
+
+        # size_hint и pos_hint берутся из TokenWidget.DEFAULT_*
+        self.token_widget = TokenWidget()
+        self.token_widget.set_value(self.tokens.get_balance())
+        self.token_widget.set_state(self.tokens.get_balance() > 0)
+        self.layout.add_widget(self.token_widget)
+
+        self.tokens.bind(on_balance_changed=self._on_balance_changed)
+
+    def _on_balance_changed(self, instance, new_balance):
+        if self.token_widget:
+            self.token_widget.set_value(int(new_balance))
+            self.token_widget.set_state(int(new_balance) > 0)
+
+    def _remove_token_widget(self):
+        try:
+            self.tokens.unbind(on_balance_changed=self._on_balance_changed)
+        except Exception:
+            pass
+
+        if self.token_widget and self.token_widget.parent:
+            self.layout.remove_widget(self.token_widget)
+        self.token_widget = None
+
+    def _flash_token_widget(self):
+        """Трижды мигает цифрой: красный → жёлтый (3 цикла). Шрифт +15%."""
+        if not self.token_widget:
+            return
+        label = self.token_widget.value_label
+        if not label:
+            return
+
+        # ✅ Звук отказа — играет, когда виджет начинает мигать красным
+        self._play_reject_sound()
+
+        yellow = (1, 0.9, 0.2, 1)
+        red = (1, 0, 0, 1)
+
+        original_font_size = label.font_size
+        label.font_size = original_font_size * 1.15
+
+        schedule = [
+            (0.00, red),
+            (0.25, yellow),
+            (0.50, red),
+            (0.75, yellow),
+            (1.00, red),
+            (1.25, yellow),
+        ]
+
+        def make_apply(color, is_last=False):
+            def _apply(dt):
+                if not (self.token_widget and self.token_widget.value_label):
+                    return
+                self.token_widget.value_label.color = color
+                if is_last:
+                    self.token_widget._update_layout()
+            return _apply
+
+        for delay, color in schedule:
+            is_last = (delay == schedule[-1][0])
+            Clock.schedule_once(make_apply(color, is_last), delay)
+
+    def _try_spend_token_and_zoom(self):
+        """Проверяет баланс, списывает жетон и запускает зум, либо мигает счётчиком."""
+        if self.tokens.get_balance() > 0:
+            self.tokens.spend(1, reason="magic_ball")
+            Clock.schedule_once(lambda dt: self._start_zoom_animation(), 0.5)
+        else:
+            self._flash_token_widget()
+
+    # ====================================================
 
     def on_enter(self):
         super().on_enter()
         self._setup_ui()
         self._create_lenses()
+        self._create_token_widget()
         Clock.schedule_interval(self._update_physics, 1 / 60.0)
 
     def on_leave(self):
@@ -980,6 +1061,7 @@ class MagicBallScreen(BaseGameScreen):
 
         self._clear_old_ball()
         self._reset_to_initial_state()
+        self._remove_token_widget()
 
     def _setup_ui(self):
         if os.path.exists(self.background_path):
@@ -1045,7 +1127,7 @@ class MagicBallScreen(BaseGameScreen):
 
         self.is_stopping = False
 
-        Clock.schedule_once(lambda dt: self._start_zoom_animation(), 0.5)
+        self._try_spend_token_and_zoom()
 
     def _update_physics(self, dt):
         if not self.ball or not self.physics:
@@ -1062,7 +1144,7 @@ class MagicBallScreen(BaseGameScreen):
 
         self.last_velocity = Vector(self.physics.velocity)
         was_moving = not self.physics.is_stopped()
-        bounced = self.physics.update(dt)
+        self.physics.update(dt)
 
         self.ball.pos = (self.physics.pos.x - self.ball_size / 2,
                          self.physics.pos.y - self.ball_size / 2)
@@ -1161,9 +1243,10 @@ class MagicBallScreen(BaseGameScreen):
                 self.layout.remove_widget(self.lens_canvas)
             self.lens_canvas = None
 
+        self._remove_token_widget()
+
         self.play_back_sound()
         self.sound_manager.fade_to(1.0, duration=0.5)
-#
-        # Используем switch_screen для пересоздания экранов
+
         from main import switch_screen
         switch_screen('menu')

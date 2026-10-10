@@ -12,7 +12,8 @@ class SoundManager:
     _is_muted = False
     _target_volume = 0.5
     _fade_clock = None
-    _is_vibration_enabled = True  # Флаг для вибрации
+    _is_vibration_enabled = True   # Флаг для вибрации
+    _is_shutting_down = False      # ✅ Флаг: приложение завершается
 
     def __new__(cls):
         if cls._instance is None:
@@ -64,6 +65,11 @@ class SoundManager:
 
     def play(self):
         """Начать воспроизведение"""
+        # ✅ Не запускаем звук, если приложение завершается
+        if self._is_shutting_down:
+            print("🔊 [SoundManager] play() пропущен - приложение завершается")
+            return
+
         print(f"🔊 [SoundManager] play() - is_muted={self._is_muted}, sound_exists={self._sound is not None}")
         if self._sound and not self._is_muted:
             if self._sound.state != 'play':
@@ -94,6 +100,23 @@ class SoundManager:
                 self._fade_clock = None
             print("🔊 [SoundManager] Звук остановлен")
 
+    def hard_stop(self):
+        """✅ Жёсткая остановка звука без fade.
+        Вызывается при выходе из приложения, чтобы не было всплеска громкости."""
+        self._is_shutting_down = True
+
+        if self._fade_clock:
+            self._fade_clock.cancel()
+            self._fade_clock = None
+
+        if self._sound:
+            try:
+                self._sound.stop()
+            except Exception:
+                pass
+
+        print("🔊 [SoundManager] hard_stop — звук выключен окончательно")
+
     def get_volume(self):
         """Получить текущую громкость"""
         return self._current_volume
@@ -118,6 +141,11 @@ class SoundManager:
 
     def unmute(self):
         """Включить звук и вибрацию"""
+        # ✅ Не включаем звук, если приложение завершается
+        if self._is_shutting_down:
+            print("🔊 [SoundManager] unmute() пропущен - приложение завершается")
+            return
+
         self._is_muted = False
         self._is_vibration_enabled = True
         if self._sound:
@@ -139,6 +167,13 @@ class SoundManager:
 
     def fade_to(self, target_volume, duration=1.0, callback=None):
         """Плавно изменяет громкость до target_volume за duration секунд."""
+        # ✅ Если приложение завершается — не запускаем fade вообще
+        if self._is_shutting_down:
+            print(f"🔊 [SoundManager] fade_to пропущен - приложение завершается")
+            if callback:
+                callback()
+            return
+
         self._target_volume = target_volume
         print(f"🔊 [SoundManager] fade_to({target_volume}, {duration}) - is_muted={self._is_muted}")
 
@@ -166,6 +201,14 @@ class SoundManager:
         print(f"🔊 [SoundManager] fade_to: start={start_volume:.3f}, target={target_volume:.3f}, steps={step_count}")
 
         def update_volume(step):
+            # ✅ Прерываем fade, если приложение начало завершаться
+            if self._is_shutting_down:
+                self._fade_clock = None
+                print("🔊 [SoundManager] fade_to прерван - приложение завершается")
+                if callback:
+                    callback()
+                return
+
             if step <= step_count and self._sound and not self._is_muted:
                 new_volume = start_volume + volume_step * step
                 self._sound.volume = max(0.0, min(0.5, new_volume))
@@ -237,7 +280,6 @@ class SoundManager:
         """Вибрация при поднятии стакана (короткая, однократная)"""
         if self._is_muted or not self._is_vibration_enabled:
             return
-        # Однократная вибрация (repeat=0), а не бесконечная (repeat=-1)
         self.vibrate_pattern([0.03, 0.02, 0.03], 0)
         print("📳 [SoundManager] Вибрация при поднятии стакана")
 

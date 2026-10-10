@@ -36,3 +36,8 @@ class PointMarker(Widget):
         self.point_y = y
         self.is_visible = visible
         self.draw_point()
+
+    def set_visible(self, visible):
+        """Скрыть/показать точку без сдвига координат."""
+        self.is_visible = visible
+        self.draw_point()

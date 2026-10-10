@@ -4,13 +4,14 @@ import uuid
 
 
 class TemplateManager:
-    """Управляет сохраненными шаблонами сегментов"""
+    """Управляет сохраненными шаблонами сегментов для викторины"""
 
     def __init__(self):
         self.templates = []
         self.templates_dir = 'assets/templates'
-        self.templates_file = os.path.join(self.templates_dir, 'templates.json')
-        self.selected_template_file = os.path.join(self.templates_dir, 'selected_template.json')
+        # Переименовываем файлы с префиксом quiz_
+        self.templates_file = os.path.join(self.templates_dir, 'templates_quiz.json')
+        self.selected_template_file = os.path.join(self.templates_dir, 'selected_template_quiz.json')
         self._ensure_directory()
         self.load_templates()
 
@@ -26,10 +27,13 @@ class TemplateManager:
                 with open(self.templates_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self.templates = data.get('templates', [])
-            except:
+                print(f"✅ Загружено {len(self.templates)} шаблонов викторины")
+            except Exception as e:
+                print(f"❌ Ошибка загрузки шаблонов викторины: {e}")
                 self.templates = []
         else:
             # Создаем шаблоны по умолчанию
+            print("📋 Файл шаблонов викторины не найден, создаю стандартные")
             self.templates = [
                 {
                     'id': 'default_1',
@@ -58,6 +62,26 @@ class TemplateManager:
                         [1, 0.2, 0.2], [0.2, 0.8, 0.2], [0.2, 0.4, 1],
                         [1, 0.8, 0.2], [1, 0.4, 0.8], [0.2, 0.8, 0.8]
                     ]
+                },
+                {
+                    'id': 'default_4',
+                    'name': 'Страны',
+                    'sectors': ['Россия', 'США', 'Китай', 'Индия', 'Бразилия', 'Австралия', 'Египет', 'Франция'],
+                    'colors': [
+                        [0.2, 0.4, 0.8], [0.8, 0.2, 0.2], [0.8, 0.2, 0.8],
+                        [1, 0.6, 0.2], [0.2, 0.8, 0.4], [0.8, 0.8, 0.2],
+                        [0.2, 0.6, 0.8], [0.8, 0.4, 0.6]
+                    ]
+                },
+                {
+                    'id': 'default_5',
+                    'name': 'Спорт',
+                    'sectors': ['Футбол', 'Баскетбол', 'Теннис', 'Хоккей', 'Волейбол', 'Бокс', 'Плавание', 'Лыжи'],
+                    'colors': [
+                        [0.2, 0.6, 0.2], [0.6, 0.2, 0.2], [0.2, 0.2, 0.6],
+                        [0.8, 0.6, 0.2], [0.6, 0.2, 0.6], [0.2, 0.6, 0.6],
+                        [0.6, 0.4, 0.2], [0.4, 0.2, 0.6]
+                    ]
                 }
             ]
             self.save_templates()
@@ -69,9 +93,10 @@ class TemplateManager:
                 with open(self.templates_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self.templates = data.get('templates', [])
+                print(f"✅ Шаблоны викторины перезагружены: {len(self.templates)}")
                 return True
             except Exception as e:
-                print(f"❌ Ошибка при перезагрузке шаблонов: {e}")
+                print(f"❌ Ошибка при перезагрузке шаблонов викторины: {e}")
                 return False
         return False
 
@@ -80,8 +105,10 @@ class TemplateManager:
         try:
             with open(self.templates_file, 'w', encoding='utf-8') as f:
                 json.dump({'templates': self.templates}, f, ensure_ascii=False, indent=2)
+            print(f"✅ Шаблоны викторины сохранены в {self.templates_file}")
             return True
-        except:
+        except Exception as e:
+            print(f"❌ Ошибка сохранения шаблонов викторины: {e}")
             return False
 
     def get_templates(self):
@@ -112,22 +139,21 @@ class TemplateManager:
             new_template = {
                 'id': str(uuid.uuid4()),
                 'name': template_data.get('name', 'Unnamed'),
-                'sectors': template_data.get('categories', []),  # Используем categories как sectors
-                'colors': []  # Пустой список цветов
+                'sectors': template_data.get('categories', []),
+                'colors': []
             }
 
-            # Добавляем в список
             self.templates.append(new_template)
             self.save_templates()
-            print(f"✅ Шаблон '{new_template['name']}' создан с ID: {new_template['id']}")
+            print(f"✅ Шаблон викторины '{new_template['name']}' создан с ID: {new_template['id']}")
             return True
 
         except Exception as e:
-            print(f"❌ Ошибка при создании шаблона: {e}")
+            print(f"❌ Ошибка при создании шаблона викторины: {e}")
             return False
 
     def add_template(self, name, sectors, colors):
-        """Добавляет новый шаблон (старый метод для совместимости)"""
+        """Добавляет новый шаблон"""
         template = {
             'id': str(uuid.uuid4()),
             'name': name,
@@ -156,7 +182,6 @@ class TemplateManager:
         """Удаляет шаблон"""
         for i, template in enumerate(self.templates):
             if template.get('id') == template_id:
-                # Не даем удалить последний шаблон
                 if len(self.templates) <= 1:
                     return False
                 del self.templates[i]
@@ -175,8 +200,10 @@ class TemplateManager:
         try:
             with open(self.selected_template_file, 'w', encoding='utf-8') as f:
                 json.dump({'selected_template_id': template_id}, f, ensure_ascii=False, indent=2)
+            print(f"✅ Выбранный шаблон викторины сохранен: {template_id}")
             return True
-        except:
+        except Exception as e:
+            print(f"❌ Ошибка сохранения выбранного шаблона викторины: {e}")
             return False
 
     def load_selected_template(self):
@@ -190,11 +217,13 @@ class TemplateManager:
                         print(f"🔍 [load_selected_template] Загружен ID: {template_id}")
                         return self.get_template(template_id)
             except Exception as e:
-                print(f"❌ Ошибка при загрузке выбранного шаблона: {e}")
+                print(f"❌ Ошибка при загрузке выбранного шаблона викторины: {e}")
                 pass
+
         # Если нет сохраненного шаблона, возвращаем первый по умолчанию
         if self.templates:
-            print(f"🔍 [load_selected_template] Нет сохраненного шаблона, возвращаем первый: {self.templates[0].get('name')}")
+            print(
+                f"🔍 [load_selected_template] Нет сохраненного шаблона, возвращаем первый: {self.templates[0].get('name')}")
             return self.templates[0]
         return None
 
@@ -208,7 +237,7 @@ class TemplateManager:
                     print(f"🔍 [get_selected_template_id] ID: {template_id}")
                     return template_id
             except Exception as e:
-                print(f"❌ Ошибка при загрузке ID выбранного шаблона: {e}")
+                print(f"❌ Ошибка при загрузке ID выбранного шаблона викторины: {e}")
                 return None
         return None
 
@@ -217,7 +246,9 @@ class TemplateManager:
         if os.path.exists(self.selected_template_file):
             try:
                 os.remove(self.selected_template_file)
+                print("🗑️ Выбранный шаблон викторины очищен")
                 return True
-            except:
+            except Exception as e:
+                print(f"❌ Ошибка при очистке выбранного шаблона викторины: {e}")
                 pass
         return False

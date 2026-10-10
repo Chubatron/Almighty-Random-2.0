@@ -10,6 +10,8 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.textinput import TextInput
 from kivy.clock import Clock
+from kivy.animation import Animation
+from kivy.utils import platform
 
 from screens.quiz.template_manager import TemplateManager
 
@@ -62,6 +64,16 @@ class BaseFairyPopup(Popup):
     def __init__(self, screen=None, bg_image='assets/images/fairy_popup.png', **kwargs):
         self.screen = screen
         self.bg_image = bg_image
+
+        # Переменные для управления сдвигом попапа
+        self._keyboard_height = 0
+        self._is_keyboard_shown = False
+        self._original_pos = (0, 0)
+        self._shift_animation = None
+        self._check_keyboard_clock = None
+        self._active_textinput = None
+        self._keyboard_check_count = 0
+
         super().__init__(**kwargs)
         self.auto_dismiss = False
 
@@ -70,24 +82,22 @@ class BaseFairyPopup(Popup):
         self.size = Window.size
 
         # Убираем ВСЕ отступы у попапа
-        self.background_color = (0, 0, 0, 0)  # Прозрачный фон
-        self.background = ''  # Убираем стандартный фон
-        self.background_normal = ''  # Убираем стандартный фон
-        self.background_down = ''  # Убираем стандартный фон
+        self.background_color = (0, 0, 0, 0)
+        self.background = ''
+        self.background_normal = ''
+        self.background_down = ''
 
-        # ОБНУЛЯЕМ ВСЕ ОТСТУПЫ
         self.padding = [0, 0, 0, 0]
         self.spacing = 0
         self.separator_height = 0
         self.separator_color = [0, 0, 0, 0]
 
-        # Дополнительные параметры для гарантии
-        self.title = ''  # Убираем заголовок
+        self.title = ''
         self.title_size = 0
         self.title_align = 'center'
-
-        # Убираем содержимое заголовка
         self.title_color = [0, 0, 0, 0]
+
+        print("🔄 [KEYBOARD] BaseFairyPopup создан")
 
     def get_screen_width(self):
         if self.screen and hasattr(self.screen, 'get_screen_width'):
@@ -99,8 +109,148 @@ class BaseFairyPopup(Popup):
             return self.screen.get_screen_height()
         return Window.height
 
+    def _on_text_input_focus(self, instance, value):
+        """Обработчик фокуса TextInput"""
+        print(f"⌨️ [KEYBOARD] TextInput фокус: {value}, поле: {instance.__class__.__name__}")
+
+        if value:  # Получил фокус
+            self._active_textinput = instance
+            self._keyboard_check_count = 0
+            print(f"⌨️ [KEYBOARD] Фокус получен, запускаем проверку клавиатуры")
+            # Запускаем проверку высоты окна
+            self._start_keyboard_check()
+        else:  # Потерял фокус
+            print(f"⌨️ [KEYBOARD] Фокус потерян, останавливаем проверку")
+            self._active_textinput = None
+            # Останавливаем проверку и возвращаем попап
+            self._stop_keyboard_check()
+            self._restore_popup_position()
+
+    def _start_keyboard_check(self):
+        """Запускает периодическую проверку высоты окна"""
+        if self._check_keyboard_clock:
+            print(f"⌨️ [KEYBOARD] Проверка уже запущена")
+            return
+
+        print(f"⌨️ [KEYBOARD] Запуск проверки клавиатуры (интервал 0.1с)")
+        # Сохраняем исходную позицию при первом появлении
+        if hasattr(self, 'content') and self._original_pos == (0, 0):
+            self._original_pos = (self.content.pos[0], self.content.pos[1])
+            print(f"⌨️ [KEYBOARD] Сохранена исходная позиция: {self._original_pos}")
+
+        # Запускаем проверку каждые 0.1 секунды
+        self._check_keyboard_clock = Clock.schedule_interval(self._check_window_height, 0.1)
+
+    def _stop_keyboard_check(self):
+        """Останавливает периодическую проверку"""
+        if self._check_keyboard_clock:
+            self._check_keyboard_clock.cancel()
+            self._check_keyboard_clock = None
+            print(f"⌨️ [KEYBOARD] Проверка остановлена (всего проверок: {self._keyboard_check_count})")
+
+    def _check_window_height(self, dt):
+        """Проверяет высоту окна и определяет наличие клавиатуры"""
+        self._keyboard_check_count += 1
+
+        if not hasattr(self, 'content'):
+            return
+
+        screen_height = self.get_screen_height()
+        current_height = Window.height
+
+        # Если высота окна уменьшилась более чем на 20% - клавиатура открыта
+        if current_height < screen_height * 0.8:
+            keyboard_height = screen_height - current_height
+            if keyboard_height > 50:
+                print(f"⌨️ [KEYBOARD] Проверка #{self._keyboard_check_count}: "
+                      f"Высота окна {current_height}px (было {screen_height}px), "
+                      f"клавиатура {keyboard_height}px")
+                self._shift_popup_up(keyboard_height)
+            else:
+                print(f"⌨️ [KEYBOARD] Проверка #{self._keyboard_check_count}: "
+                      f"Клавиатура мала ({keyboard_height}px), игнорируем")
+        else:
+            # Если клавиатура была открыта и закрылась
+            if self._is_keyboard_shown:
+                print(f"⌨️ [KEYBOARD] Проверка #{self._keyboard_check_count}: "
+                      f"Клавиатура закрыта (высота окна {current_height}px)")
+                self._restore_popup_position()
+
+    def _shift_popup_up(self, keyboard_height):
+        """Сдвигает попап вверх при появлении клавиатуры"""
+        if keyboard_height <= 0:
+            return
+
+        # Проверяем, не изменилась ли высота клавиатуры
+        if self._is_keyboard_shown and abs(self._keyboard_height - keyboard_height) < 50:
+            print(f"⌨️ [KEYBOARD] Высота клавиатуры не изменилась ({keyboard_height}px), пропускаем")
+            return
+
+        self._is_keyboard_shown = True
+        self._keyboard_height = keyboard_height
+
+        print(f"⌨️ [KEYBOARD] Сдвиг попапа: высота клавиатуры {keyboard_height}px, "
+              f"исходная позиция {self._original_pos}")
+
+        # Отменяем предыдущую анимацию
+        if self._shift_animation:
+            self._shift_animation.cancel(self)
+            self._shift_animation = None
+
+        if hasattr(self, 'content'):
+            # Сдвигаем на 60% высоты клавиатуры, но не более чем на 70% высоты экрана
+            shift_amount = min(keyboard_height * 0.6, self.get_screen_height() * 0.7)
+            target_y = self._original_pos[1] + shift_amount
+
+            print(f"⌨️ [KEYBOARD] Расчет сдвига: shift={shift_amount:.0f}px, "
+                  f"целевая позиция Y={target_y:.0f}px")
+
+            # Проверяем, чтобы контент не уходил за верхний край
+            max_y = self.get_screen_height() - self.content.height * 0.3
+            if target_y > max_y:
+                print(f"⌨️ [KEYBOARD] Корректировка: target_y {target_y:.0f} > max_y {max_y:.0f}, "
+                      f"устанавливаем max_y")
+                target_y = max_y
+
+            if target_y > self._original_pos[1]:
+                self._shift_animation = Animation(
+                    pos=(self.content.pos[0], target_y),
+                    duration=0.25,
+                    transition='in_out_quad'
+                )
+                self._shift_animation.start(self.content)
+                print(f"⌨️ [KEYBOARD] ✅ Попап сдвинут на {shift_amount:.0f}px "
+                      f"(текущая позиция: {self.content.pos})")
+            else:
+                print(f"⌨️ [KEYBOARD] ⚠️ Сдвиг не требуется (target_y {target_y:.0f} <= {self._original_pos[1]:.0f})")
+
+    def _restore_popup_position(self):
+        """Возвращает попап на исходную позицию"""
+        if not self._is_keyboard_shown:
+            print(f"⌨️ [KEYBOARD] Попап уже в исходной позиции")
+            return
+
+        self._is_keyboard_shown = False
+        self._keyboard_height = 0
+
+        print(f"⌨️ [KEYBOARD] Восстановление позиции попапа: {self._original_pos}")
+
+        if self._shift_animation:
+            self._shift_animation.cancel(self)
+            self._shift_animation = None
+
+        if hasattr(self, 'content') and self._original_pos != (0, 0):
+            self._shift_animation = Animation(
+                pos=self._original_pos,
+                duration=0.25,
+                transition='in_out_quad'
+            )
+            self._shift_animation.start(self.content)
+            print(f"⌨️ [KEYBOARD] ✅ Попап восстановлен (позиция: {self.content.pos})")
+
     def show_message(self, message):
         """Показывает сообщение в центре экрана на 2 секунды"""
+        print(f"💬 [KEYBOARD] Показ сообщения: {message}")
         screen_width = self.get_screen_width()
         screen_height = self.get_screen_height()
 
@@ -109,8 +259,6 @@ class BaseFairyPopup(Popup):
         msg_layout = FloatLayout()
         msg_layout.size_hint = (1, 1)
         msg_layout.pos = (0, 0)
-
-        # ФОН УБРАН - никаких Canvas инструкций
 
         msg_label = Label(
             text=message,
@@ -140,6 +288,14 @@ class BaseFairyPopup(Popup):
                     self.content.remove_widget(self.temp_message)
             self.temp_message = None
 
+    def on_dismiss(self):
+        """При закрытии попапа восстанавливаем позицию"""
+        print(f"❌ [KEYBOARD] Попап закрыт, восстанавливаем позицию")
+        self._stop_keyboard_check()
+        self._restore_popup_position()
+        super().on_dismiss()
+
+
 class TemplatePopup(BaseFairyPopup):
     """Popup with template list and buttons"""
 
@@ -153,12 +309,9 @@ class TemplatePopup(BaseFairyPopup):
         self.title = ''
         self.callback = callback
         self.template_manager = TemplateManager()
-        # Сохраняем как строку для надежного сравнения
         self.selected_template = str(current_template_id) if current_template_id is not None else None
-        print(
-            f"🔍 [TemplatePopup] Инициализация. current_template_id: {current_template_id}, selected_template: {self.selected_template}")
+        print(f"🔍 [TemplatePopup] Инициализация. selected_template: {self.selected_template}")
         self.screen = screen
-        # Используем стандартный фон для основного попапа
         super().__init__(screen=screen, bg_image='assets/images/fairy_popup.png', **kwargs)
         self.create_buttons()
 
@@ -167,17 +320,14 @@ class TemplatePopup(BaseFairyPopup):
         screen_width = self.get_screen_width()
         screen_height = self.get_screen_height()
 
-        # ВЫЧИСЛЯЕМ РАЗМЕРЫ КНОПОК
         button_width = screen_width * self.BUTTON_WIDTH_COEFF
         button_height = screen_height * self.BUTTON_HEIGHT_COEFF
         font_size = screen_height * self.BUTTON_FONT_SIZE_COEFF
 
-        # ============ СОЗДАЕМ FloatLayout НАПРЯМУЮ КАК CONTENT ============
         content_layout = FloatLayout()
         content_layout.size_hint = (1, 1)
         content_layout.pos = (0, 0)
 
-        # Фоновое изображение (в before) - НА ВЕСЬ ЭКРАН
         with content_layout.canvas.before:
             Color(1, 1, 1, 1)
             self.bg_rect = Rectangle(
@@ -186,11 +336,8 @@ class TemplatePopup(BaseFairyPopup):
                 size=content_layout.size
             )
 
-        # Обновляем фон при изменении позиции или размера
         content_layout.bind(pos=self.update_bg, size=self.update_bg)
 
-        # ============ КОНТЕЙНЕР СО СПИСКОМ ============
-        # Создаем ScrollView с абсолютными координатами
         scroll_width = screen_width * 0.5
         scroll_height = screen_height * 0.4
         scroll_x = screen_width * 0.5 - (scroll_width / 2)
@@ -200,13 +347,11 @@ class TemplatePopup(BaseFairyPopup):
         scroll.size_hint = (None, None)
         scroll.size = (scroll_width, scroll_height)
         scroll.pos = (scroll_x, scroll_y)
-        # Убираем фон ScrollView
         scroll.background_color = (0, 0, 0, 0)
         scroll.background = ''
         scroll.background_normal = ''
         scroll.background_down = ''
 
-        # Список шаблонов
         self.templates_list = GridLayout(
             cols=1,
             spacing=5,
@@ -218,7 +363,6 @@ class TemplatePopup(BaseFairyPopup):
         scroll.add_widget(self.templates_list)
         content_layout.add_widget(scroll)
 
-        # ============ КНОПКИ ============
         buttons_data = [
             {'text': 'LOAD', 'color': (0.0, 0.5, 1.0, 0)},
             {'text': 'EDIT', 'color': (1.0, 0.7, 0.0, 0)},
@@ -246,53 +390,30 @@ class TemplatePopup(BaseFairyPopup):
             content_layout.add_widget(btn)
             self.buttons.append(btn)
 
-        # Устанавливаем content_layout как content напрямую
         self.content = content_layout
+        print(f"✅ [TemplatePopup] UI создан")
 
     def update_bg(self, instance, value):
-        """Обновляет фоновое изображение"""
         if hasattr(self, 'bg_rect'):
             self.bg_rect.pos = instance.pos
             self.bg_rect.size = instance.size
 
     def refresh_templates_list(self):
-        """Обновляет список шаблонов"""
         self.templates_list.clear_widgets()
 
-        # Перезагружаем шаблоны из файла перед обновлением
         self.template_manager.reload_templates()
         templates = self.template_manager.get_templates()
 
-        # Получаем размеры экрана
         screen_height = self.get_screen_height()
-        screen_width = self.get_screen_width()
-
-        # Вычисляем размеры шрифта в зависимости от экрана
         base_font_size = screen_height * 0.04
         selected_font_size = base_font_size * 1.3
-
-        # Вычисляем высоту кнопок
         base_height = screen_height * 0.055
         selected_height = base_height * 1.25
 
-        print(f"🔍 [refresh_templates_list] Выбранный ID: {self.selected_template}")
-        print(f"🔍 [refresh_templates_list] Всего шаблонов: {len(templates)}")
-
-        # Выводим все ID шаблонов для отладки
-        for t in templates:
-            print(f"   Шаблон: {t.get('name')}, ID: {t.get('id')} (тип: {type(t.get('id'))})")
-
         for template in templates:
-            # Приводим ID к строке для надежного сравнения
             template_id = str(template.get('id', ''))
             is_selected = template_id == self.selected_template
 
-            if is_selected:
-                print(f"✅ [refresh_templates_list] ВЫБРАН шаблон: {template.get('name')} (ID: {template_id})")
-            else:
-                print(f"   Обычный шаблон: {template.get('name')} (ID: {template_id})")
-
-            # Для выбранного шаблона увеличиваем шрифт, для остальных - стандартный
             font_size = selected_font_size if is_selected else base_font_size
 
             btn = Button(
@@ -300,8 +421,8 @@ class TemplatePopup(BaseFairyPopup):
                 size_hint_y=None,
                 height=selected_height if is_selected else base_height,
                 background_normal='',
-                background_color=(0, 0, 0, 0),  # Прозрачный фон для всех
-                color=(0, 0, 0, 1),  # Черный цвет текста
+                background_color=(0, 0, 0, 0),
+                color=(0, 0, 0, 1),
                 bold=True,
                 font_size=font_size
             )
@@ -332,7 +453,6 @@ class TemplatePopup(BaseFairyPopup):
     def load_template(self):
         print(f"📂 [TemplatePopup] Загрузка шаблона")
         if self.selected_template:
-            # Ищем шаблон по ID
             template = None
             for t in self.template_manager.get_templates():
                 if str(t.get('id', '')) == self.selected_template:
@@ -353,7 +473,6 @@ class TemplatePopup(BaseFairyPopup):
             self.show_message('Please select a template to edit')
             return
 
-        # Получаем выбранный шаблон
         template = None
         for t in self.template_manager.get_templates():
             if str(t.get('id', '')) == self.selected_template:
@@ -364,7 +483,6 @@ class TemplatePopup(BaseFairyPopup):
             self.show_message('Template not found')
             return
 
-        # Открываем попап редактирования с данными шаблона
         edit_popup = EditTemplatePopup(
             template=template,
             callback=self.on_template_updated,
@@ -373,14 +491,11 @@ class TemplatePopup(BaseFairyPopup):
         edit_popup.open()
 
     def on_template_updated(self, template_data):
-        """Обработчик обновления шаблона"""
         print(f"✅ [TemplatePopup] Шаблон обновлен: {template_data}")
-        # Обновляем список шаблонов
         self.refresh_templates_list()
 
     def create_template(self):
         print(f"➕ [TemplatePopup] Создание шаблона")
-        # Открываем попап создания шаблона
         create_popup = CreateTemplatePopup(
             callback=self.on_template_created,
             screen=self.screen
@@ -388,19 +503,15 @@ class TemplatePopup(BaseFairyPopup):
         create_popup.open()
 
     def on_template_created(self, template_data):
-        """Обработчик создания нового шаблона"""
         print(f"✅ [TemplatePopup] Шаблон создан: {template_data}")
-        # Обновляем список шаблонов
         self.refresh_templates_list()
 
     def delete_template(self):
-        """Удаляет выбранный шаблон без подтверждения"""
         print(f"🗑️ [TemplatePopup] Удаление шаблона")
         if not self.selected_template:
             self.show_message('Please select a template to delete')
             return
 
-        # Ищем ID шаблона
         template_id = None
         for t in self.template_manager.get_templates():
             if str(t.get('id', '')) == self.selected_template:
@@ -411,14 +522,11 @@ class TemplatePopup(BaseFairyPopup):
             self.show_message('Template not found')
             return
 
-        # Пытаемся удалить шаблон
         success = self.template_manager.delete_template(template_id)
 
         if success:
             print(f"✅ [TemplatePopup] Шаблон удален")
-            # Сбрасываем выбранный шаблон
             self.selected_template = None
-            # Обновляем список
             self.refresh_templates_list()
         else:
             self.show_message('Cannot delete the last template')
@@ -437,7 +545,6 @@ class EditTemplatePopup(BaseFairyPopup):
     BUTTON_POSITIONS_X = [0.4, 0.6]
     BUTTON_POSITIONS_Y = [0.265, 0.265]
 
-    # Ограничения
     MAX_NAME_LENGTH = 30
     MAX_CATEGORIES = 20
 
@@ -447,7 +554,7 @@ class EditTemplatePopup(BaseFairyPopup):
         self.callback = callback
         self.screen = screen
         self.template_manager = TemplateManager()
-        # Используем fairy_popup_2.png для редактирования
+        print(f"✏️ [EditTemplatePopup] Инициализация с шаблоном: {template.get('name') if template else 'None'}")
         super().__init__(screen=screen, bg_image='assets/images/fairy_popup_2.png', **kwargs)
         self.create_ui()
 
@@ -459,7 +566,6 @@ class EditTemplatePopup(BaseFairyPopup):
         content_layout.size_hint = (1, 1)
         content_layout.pos = (0, 0)
 
-        # Фоновое изображение (в before) - НА ВЕСЬ ЭКРАН
         with content_layout.canvas.before:
             Color(1, 1, 1, 1)
             self.bg_rect = Rectangle(
@@ -468,7 +574,6 @@ class EditTemplatePopup(BaseFairyPopup):
                 size=content_layout.size
             )
 
-        # Обновляем фон при изменении позиции или размера
         content_layout.bind(pos=self.update_bg, size=self.update_bg)
 
         font_size = screen_height * self.BUTTON_FONT_SIZE_COEFF
@@ -476,7 +581,6 @@ class EditTemplatePopup(BaseFairyPopup):
         input_height = screen_height * 0.08
         input_width = screen_width * 0.5
 
-        # Заголовок
         title_label = Label(
             text='',
             font_size=font_size * 1.5,
@@ -492,7 +596,6 @@ class EditTemplatePopup(BaseFairyPopup):
         )
         content_layout.add_widget(title_label)
 
-        # Поле для названия шаблона (заполнено данными из шаблона)
         name_label = Label(
             text=f'Template Name (max {self.MAX_NAME_LENGTH} chars):',
             font_size=label_font_size,
@@ -508,7 +611,6 @@ class EditTemplatePopup(BaseFairyPopup):
         )
         content_layout.add_widget(name_label)
 
-        # Заполняем поле названия из шаблона
         template_name = self.template.get('name', '') if self.template else ''
 
         self.name_input = TextInput(
@@ -523,11 +625,10 @@ class EditTemplatePopup(BaseFairyPopup):
             padding=[10, 10],
             multiline=False
         )
-        # Добавляем ограничение на длину
         self.name_input.bind(text=self._limit_name_length)
+        self.name_input.bind(focus=self._on_text_input_focus)
         content_layout.add_widget(self.name_input)
 
-        # Поле для категорий (заполнено данными из шаблона)
         categories_label = Label(
             text=f'Categories (comma separated, max {self.MAX_CATEGORIES}):',
             font_size=label_font_size,
@@ -543,7 +644,6 @@ class EditTemplatePopup(BaseFairyPopup):
         )
         content_layout.add_widget(categories_label)
 
-        # Заполняем поле категорий из шаблона (преобразуем список в строку через запятую)
         template_categories = self.template.get('sectors', []) if self.template else []
         categories_text = ', '.join(template_categories) if template_categories else ''
 
@@ -559,11 +659,10 @@ class EditTemplatePopup(BaseFairyPopup):
             padding=[10, 10],
             multiline=False
         )
-        # Добавляем ограничение на количество категорий через запятые
         self.categories_input.bind(text=self._limit_categories_count)
+        self.categories_input.bind(focus=self._on_text_input_focus)
         content_layout.add_widget(self.categories_input)
 
-        # Кнопки с прозрачным фоном
         buttons_data = [
             {'text': 'SAVE', 'color': (0.0, 0.8, 0.2, 0)},
             {'text': 'CANCEL', 'color': (0.8, 0.0, 0.0, 0)}
@@ -588,32 +687,25 @@ class EditTemplatePopup(BaseFairyPopup):
             content_layout.add_widget(btn)
 
         self.content = content_layout
+        print(f"✅ [EditTemplatePopup] UI создан")
 
     def _limit_name_length(self, instance, value):
-        """Ограничивает длину названия"""
         if len(value) > self.MAX_NAME_LENGTH:
             instance.text = value[:self.MAX_NAME_LENGTH]
 
     def _limit_categories_count(self, instance, value):
-        """Ограничивает количество категорий по числу запятых"""
-        # Считаем количество запятых
         comma_count = value.count(',')
-        # Если запятых больше или равно MAX_CATEGORIES - 1 (так как категорий на 1 больше чем запятых)
         if comma_count >= self.MAX_CATEGORIES - 1:
-            # Находим позицию последней запятой, которая превышает лимит
-            # Ищем позицию (MAX_CATEGORIES - 1)-й запятой
             positions = []
             for i, char in enumerate(value):
                 if char == ',':
                     positions.append(i)
             if len(positions) >= self.MAX_CATEGORIES - 1:
-                # Обрезаем текст до позиции последней допустимой запятой
                 last_allowed_pos = positions[self.MAX_CATEGORIES - 2] if self.MAX_CATEGORIES - 2 >= 0 else -1
                 if last_allowed_pos >= 0:
                     instance.text = value[:last_allowed_pos + 1]
 
     def update_bg(self, instance, value):
-        """Обновляет фоновое изображение"""
         if hasattr(self, 'bg_rect'):
             self.bg_rect.pos = instance.pos
             self.bg_rect.size = instance.size
@@ -626,11 +718,9 @@ class EditTemplatePopup(BaseFairyPopup):
             self.dismiss()
 
     def save_template(self):
-        """Сохраняет изменения в шаблоне"""
         name = self.name_input.text.strip()
         categories_text = self.categories_input.text.strip()
 
-        # Проверка на пустые поля
         if not name:
             self.show_message('Please enter a template name')
             return
@@ -639,22 +729,17 @@ class EditTemplatePopup(BaseFairyPopup):
             self.show_message('Please enter at least one category')
             return
 
-        # Проверка длины названия
         if len(name) > self.MAX_NAME_LENGTH:
             self.show_message(f'Name must be less than {self.MAX_NAME_LENGTH} chars')
             return
 
-        # Разбираем категории
         categories = []
         if categories_text:
             categories = [cat.strip() for cat in categories_text.split(',') if cat.strip()]
-
-            # Проверка количества категорий
             if len(categories) > self.MAX_CATEGORIES:
                 self.show_message(f'Maximum {self.MAX_CATEGORIES} categories allowed')
                 return
 
-        # Обновляем шаблон
         template_id = self.template.get('id') if self.template else None
         if not template_id:
             self.show_message('Template ID not found')
@@ -670,7 +755,6 @@ class EditTemplatePopup(BaseFairyPopup):
             print(f"✅ [EditTemplatePopup] Шаблон обновлен: {name}")
             self.dismiss()
             if self.callback:
-                # Возвращаем обновленные данные
                 updated_template = self.template_manager.get_template(template_id)
                 self.callback(updated_template)
         else:
@@ -686,7 +770,6 @@ class CreateTemplatePopup(BaseFairyPopup):
     BUTTON_POSITIONS_X = [0.4, 0.6]
     BUTTON_POSITIONS_Y = [0.265, 0.265]
 
-    # Ограничения
     MAX_NAME_LENGTH = 30
     MAX_CATEGORIES = 20
 
@@ -695,7 +778,7 @@ class CreateTemplatePopup(BaseFairyPopup):
         self.callback = callback
         self.screen = screen
         self.template_manager = TemplateManager()
-        # Используем fairy_popup_2.png для создания
+        print(f"➕ [CreateTemplatePopup] Инициализация")
         super().__init__(screen=screen, bg_image='assets/images/fairy_popup_2.png', **kwargs)
         self.create_ui()
 
@@ -707,7 +790,6 @@ class CreateTemplatePopup(BaseFairyPopup):
         content_layout.size_hint = (1, 1)
         content_layout.pos = (0, 0)
 
-        # Фоновое изображение (в before) - НА ВЕСЬ ЭКРАН
         with content_layout.canvas.before:
             Color(1, 1, 1, 1)
             self.bg_rect = Rectangle(
@@ -716,7 +798,6 @@ class CreateTemplatePopup(BaseFairyPopup):
                 size=content_layout.size
             )
 
-        # Обновляем фон при изменении позиции или размера
         content_layout.bind(pos=self.update_bg, size=self.update_bg)
 
         font_size = screen_height * self.BUTTON_FONT_SIZE_COEFF
@@ -724,7 +805,6 @@ class CreateTemplatePopup(BaseFairyPopup):
         input_height = screen_height * 0.08
         input_width = screen_width * 0.5
 
-        # Заголовок
         title_label = Label(
             text='',
             font_size=font_size * 1.5,
@@ -740,7 +820,6 @@ class CreateTemplatePopup(BaseFairyPopup):
         )
         content_layout.add_widget(title_label)
 
-        # Поле для названия шаблона
         name_label = Label(
             text=f'Template Name (max {self.MAX_NAME_LENGTH} chars):',
             font_size=label_font_size,
@@ -768,11 +847,10 @@ class CreateTemplatePopup(BaseFairyPopup):
             padding=[10, 10],
             multiline=False
         )
-        # Добавляем ограничение на длину
         self.name_input.bind(text=self._limit_name_length)
+        self.name_input.bind(focus=self._on_text_input_focus)
         content_layout.add_widget(self.name_input)
 
-        # Поле для категорий
         categories_label = Label(
             text=f'Categories (comma separated, max {self.MAX_CATEGORIES}):',
             font_size=label_font_size,
@@ -800,11 +878,10 @@ class CreateTemplatePopup(BaseFairyPopup):
             padding=[10, 10],
             multiline=False
         )
-        # Добавляем ограничение на количество категорий через запятые
         self.categories_input.bind(text=self._limit_categories_count)
+        self.categories_input.bind(focus=self._on_text_input_focus)
         content_layout.add_widget(self.categories_input)
 
-        # Кнопки с прозрачным фоном
         buttons_data = [
             {'text': 'CREATE', 'color': (0.0, 1.0, 0.3, 0)},
             {'text': 'CANCEL', 'color': (1.0, 0.0, 0.0, 0)}
@@ -829,32 +906,25 @@ class CreateTemplatePopup(BaseFairyPopup):
             content_layout.add_widget(btn)
 
         self.content = content_layout
+        print(f"✅ [CreateTemplatePopup] UI создан")
 
     def _limit_name_length(self, instance, value):
-        """Ограничивает длину названия"""
         if len(value) > self.MAX_NAME_LENGTH:
             instance.text = value[:self.MAX_NAME_LENGTH]
 
     def _limit_categories_count(self, instance, value):
-        """Ограничивает количество категорий по числу запятых"""
-        # Считаем количество запятых
         comma_count = value.count(',')
-        # Если запятых больше или равно MAX_CATEGORIES - 1 (так как категорий на 1 больше чем запятых)
         if comma_count >= self.MAX_CATEGORIES - 1:
-            # Находим позицию последней запятой, которая превышает лимит
-            # Ищем позицию (MAX_CATEGORIES - 1)-й запятой
             positions = []
             for i, char in enumerate(value):
                 if char == ',':
                     positions.append(i)
             if len(positions) >= self.MAX_CATEGORIES - 1:
-                # Обрезаем текст до позиции последней допустимой запятой
                 last_allowed_pos = positions[self.MAX_CATEGORIES - 2] if self.MAX_CATEGORIES - 2 >= 0 else -1
                 if last_allowed_pos >= 0:
                     instance.text = value[:last_allowed_pos + 1]
 
     def update_bg(self, instance, value):
-        """Обновляет фоновое изображение"""
         if hasattr(self, 'bg_rect'):
             self.bg_rect.pos = instance.pos
             self.bg_rect.size = instance.size
@@ -867,11 +937,9 @@ class CreateTemplatePopup(BaseFairyPopup):
             self.dismiss()
 
     def create_template(self):
-        """Создает новый шаблон из введенных данных"""
         name = self.name_input.text.strip()
         categories_text = self.categories_input.text.strip()
 
-        # Проверка на пустые поля
         if not name:
             self.show_message('Please enter a template name')
             return
@@ -880,28 +948,22 @@ class CreateTemplatePopup(BaseFairyPopup):
             self.show_message('Please enter at least one category')
             return
 
-        # Проверка длины названия
         if len(name) > self.MAX_NAME_LENGTH:
             self.show_message(f'Name must be less than {self.MAX_NAME_LENGTH} chars')
             return
 
-        # Разбираем категории
         categories = []
         if categories_text:
             categories = [cat.strip() for cat in categories_text.split(',') if cat.strip()]
-
-            # Проверка количества категорий
             if len(categories) > self.MAX_CATEGORIES:
                 self.show_message(f'Maximum {self.MAX_CATEGORIES} categories allowed')
                 return
 
-        # Создаем шаблон
         template_data = {
             'name': name,
             'categories': categories
         }
 
-        # Сохраняем шаблон через менеджер
         success = self.template_manager.create_template(template_data)
 
         if success:
@@ -924,7 +986,6 @@ class ConfirmPopup(BaseFairyPopup):
         self.title = message
         self.callback = callback
         self.screen = screen
-        # Используем стандартный фон
         super().__init__(screen=screen, bg_image='assets/images/fairy_popup.png', **kwargs)
         self.create_buttons()
 
@@ -936,7 +997,6 @@ class ConfirmPopup(BaseFairyPopup):
         content_layout.size_hint = (1, 1)
         content_layout.pos = (0, 0)
 
-        # Фоновое изображение (в before) - НА ВЕСЬ ЭКРАН
         with content_layout.canvas.before:
             Color(1, 1, 1, 1)
             self.bg_rect = Rectangle(
@@ -945,7 +1005,6 @@ class ConfirmPopup(BaseFairyPopup):
                 size=content_layout.size
             )
 
-        # Обновляем фон при изменении позиции или размера
         content_layout.bind(pos=self.update_bg, size=self.update_bg)
 
         button_width = screen_width * self.BUTTON_WIDTH_COEFF
@@ -990,7 +1049,6 @@ class ConfirmPopup(BaseFairyPopup):
         self.content = content_layout
 
     def update_bg(self, instance, value):
-        """Обновляет фоновое изображение"""
         if hasattr(self, 'bg_rect'):
             self.bg_rect.pos = instance.pos
             self.bg_rect.size = instance.size

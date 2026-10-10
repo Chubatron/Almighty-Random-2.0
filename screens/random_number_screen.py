@@ -6,7 +6,6 @@ from kivy.clock import Clock
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.image import Image as KivyImage
 from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 from kivy.graphics import PushMatrix, PopMatrix, Rotate, Translate, Color, Rectangle, Line
 from kivy.core.window import Window
@@ -25,23 +24,22 @@ from screens.base_game_screen import BaseGameScreen
 from screens.random_number.modal_number_input import SimpleNumberInputPopup, CustomModal
 from screens.random_number.history_popup import HistoryPopup, set_random_number_screen
 from sound_manager import SoundManager
+from lucky_token import LuckyToken
+from components.token_widget import TokenWidget
 
 # Debug mode
-DEBUG_MODE = False  # Отключен режим отладки
+DEBUG_MODE = False
+# ✅ Отладка виджета жетона
+DEBUG_TOKEN_WIDGET = True
 
-# History file
 HISTORY_FILE = 'random_numbers_history.txt'
-
-# State file for saving MIN/MAX between sessions
 STATE_FILE = 'random_number_state.json'
 
-# Глобальное состояние
 _history_state = {
     'generation_counter': 0,
     'last_range': "0 - 1000"
 }
 
-# Глобальное состояние для MIN/MAX
 _range_state = {
     'min_value': 0,
     'max_value': 1000
@@ -49,7 +47,6 @@ _range_state = {
 
 
 def load_range_state():
-    """Загружает сохранённый диапазон из файла"""
     global _range_state
     global _history_state
     try:
@@ -79,7 +76,6 @@ def load_range_state():
 
 
 def save_range_state(min_val, max_val):
-    """Сохраняет диапазон в файл"""
     global _range_state
     global _history_state
     try:
@@ -101,8 +97,6 @@ load_range_state()
 
 
 class AdaptiveBackground(Image):
-    """Adaptive background - stretches to full screen"""
-
     def __init__(self, source='', **kwargs):
         super().__init__(**kwargs)
         self.source = source
@@ -113,8 +107,6 @@ class AdaptiveBackground(Image):
 
 
 class SemiTransparentBackground(Widget):
-    """Полупрозрачный фон для кнопок управления"""
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         with self.canvas.before:
@@ -128,8 +120,6 @@ class SemiTransparentBackground(Widget):
 
 
 class ImageButton(ButtonBehavior, KivyImage):
-    """Button with image"""
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._click_sound = None
@@ -164,9 +154,6 @@ class ImageButton(ButtonBehavior, KivyImage):
 
 
 class SpriteSheetButton(ButtonBehavior, Widget):
-    """Button with image from spritesheet - с простой анимацией"""
-    # Порядок обхода: СНИЗУ-ВВЕРХ, СЛЕВА-НАПРАВО
-
     WIDGET_WIDTH_COEFF = 0.068
     WIDGET_HEIGHT_COEFF = 0.33
 
@@ -184,7 +171,7 @@ class SpriteSheetButton(ButtonBehavior, Widget):
         self.total_frames_for_animation = 0
         self._sound_manager = SoundManager()
         self._end_sound = None
-        self._end_sound_played = False  # Флаг, чтобы не играть звук дважды
+        self._end_sound_played = False
         self._load_end_sound()
 
         screen_width = Window.width
@@ -196,7 +183,6 @@ class SpriteSheetButton(ButtonBehavior, Widget):
         print(f"[SPRITE INIT] Создана кнопка {button_index} с путём: {sprite_sheet_path}")
 
     def _load_end_sound(self):
-        """Загружает звук окончания анимации"""
         try:
             from kivy.core.audio import SoundLoader
             sound_path = 'assets/sounds/r_number/end.mp3'
@@ -204,14 +190,10 @@ class SpriteSheetButton(ButtonBehavior, Widget):
                 self._end_sound = SoundLoader.load(sound_path)
                 if self._end_sound:
                     self._end_sound.volume = 0.5
-                    print(f"[SOUND] Загружен звук end.mp3 для кнопки {self.button_index}")
-            else:
-                print(f"[SOUND] Файл end.mp3 не найден для кнопки {self.button_index}")
-        except Exception as e:
-            print(f"[SOUND] Ошибка загрузки end.mp3 для кнопки {self.button_index}: {e}")
+        except Exception:
+            pass
 
     def play_end_sound(self):
-        """Воспроизводит звук окончания анимации"""
         if self._sound_manager.is_muted():
             return
         if self._end_sound and not self._end_sound_played:
@@ -220,75 +202,35 @@ class SpriteSheetButton(ButtonBehavior, Widget):
                     self._end_sound.stop()
                 self._end_sound.play()
                 self._end_sound_played = True
-                print(f"[SOUND] Воспроизведен end.mp3 для кнопки {self.button_index}")
-            except Exception as e:
-                print(f"[SOUND] Ошибка воспроизведения end.mp3 для кнопки {self.button_index}: {e}")
+            except Exception:
+                pass
 
     def set_frame(self, col, row):
-        """Устанавливает кадр по координатам столбца и строки"""
-        print(f"[SET_FRAME] Кнопка {self.button_index}: установка кадра (col={col}, row={row})")
         if 0 <= col < 10 and 0 <= row < 12:
             self._load_sprite(col, row)
-        else:
-            print(f"[SET_FRAME] ОШИБКА: неверные координаты (col={col}, row={row}) для кнопки {self.button_index}")
-
-    def get_total_frames_for_animation(self, target_col, target_row):
-        """Рассчитывает общее количество кадров для анимации до целевого кадра с 2 оборотами"""
-        # ПОРЯДОК: СНИЗУ-ВВЕРХ, СЛЕВА-НАПРАВО
-        # frame = col * 12 + (11 - row)
-        current_frame = self.current_col * 12 + (11 - self.current_row)
-        target_frame = target_col * 12 + (11 - target_row)
-
-        # Количество кадров до цели
-        if current_frame <= target_frame:
-            frames_to_target = target_frame - current_frame
-        else:
-            frames_to_target = (120 - current_frame) + target_frame
-
-        # Добавляем 2 полных оборота (120 кадров * 2 = 240)
-        total_frames = frames_to_target + 240
-        return total_frames
 
     def animate_to_frame(self, target_col, target_row, duration=1.0, on_complete=None):
-        """
-        Простая анимация: прокрутка спрайтлиста до целевого кадра
-        с 2 полными оборотами
-        Порядок обхода: СНИЗУ-ВВЕРХ, СЛЕВА-НАПРАВО
-        """
         if self.is_animating:
             return 0
 
         self.is_animating = True
-        self._end_sound_played = False  # Сбрасываем флаг при старте анимации
+        self._end_sound_played = False
 
-        # ПОРЯДОК: СНИЗУ-ВВЕРХ, СЛЕВА-НАПРАВО
-        # frame = col * 12 + (11 - row)
         current_frame = self.current_col * 12 + (11 - self.current_row)
         target_frame = target_col * 12 + (11 - target_row)
 
-        # Количество кадров до цели
         if current_frame <= target_frame:
             frames_to_target = target_frame - current_frame
         else:
             frames_to_target = (120 - current_frame) + target_frame
 
-        # Добавляем 2 полных оборота (120 кадров * 2 = 240)
         total_frames = frames_to_target + 240
         self.total_frames_for_animation = total_frames
 
-        print(
-            f"[ANIMATE] Кнопка {self.button_index}: анимация с кадра {current_frame} на {target_frame}, всего {total_frames} шагов")
-
-        # Длительность одного шага
         step_duration = duration / total_frames
-
-        # Вычисляем, на каком шаге нужно запустить звук (за 0.5 секунды до конца)
-        # 0.5 секунды = 0.5 / step_duration шагов
         sound_trigger_step = total_frames - int(0.3 / step_duration)
         if sound_trigger_step < 0:
             sound_trigger_step = 0
-        print(
-            f"[ANIMATE] Кнопка {self.button_index}: звук end.mp3 будет на шаге {sound_trigger_step} (из {total_frames})")
 
         steps_passed = 0
 
@@ -300,32 +242,21 @@ class SpriteSheetButton(ButtonBehavior, Widget):
                     on_complete()
                 return
 
-            # Переход к следующему кадру
             current_frame = self.current_col * 12 + (11 - self.current_row)
             next_frame_num = (current_frame + 1) % 120
 
-            # Преобразуем номер кадра в координаты
-            # frame = col * 12 + (11 - row)
-            # col = frame // 12
-            # row = 11 - (frame % 12)
             next_col = next_frame_num // 12
             next_row = 11 - (next_frame_num % 12)
 
             self._load_sprite(next_col, next_row)
-
             steps_passed += 1
 
-            # Проверяем, нужно ли воспроизвести звук (за 0.5 секунды до конца)
             if not self._end_sound_played and steps_passed >= sound_trigger_step:
                 self.play_end_sound()
 
-            # Проверяем, достигли ли цели
             if steps_passed >= total_frames:
-                # Принудительно устанавливаем целевой кадр
                 self._load_sprite(target_col, target_row)
                 self.is_animating = False
-                print(f"[ANIMATE] Кнопка {self.button_index}: анимация завершена на кадре ({target_col}, {target_row})")
-                # Если звук еще не был воспроизведен (страховка)
                 if not self._end_sound_played:
                     self.play_end_sound()
                 if on_complete:
@@ -338,7 +269,6 @@ class SpriteSheetButton(ButtonBehavior, Widget):
 
     def _load_sprite(self, col, row):
         try:
-            print(f"[LOAD_SPRITE] Кнопка {self.button_index}: загрузка кадра (col={col}, row={row})")
             sprite_sheet = CoreImage(self.sprite_sheet_path)
             texture_height = sprite_sheet.texture.height
 
@@ -366,14 +296,9 @@ class SpriteSheetButton(ButtonBehavior, Widget):
 
                 self.current_col = col
                 self.current_row = row
-                print(f"[LOAD_SPRITE] Кнопка {self.button_index}: успешно загружен кадр ({col}, {row})")
-
-            else:
-                print(
-                    f"[LOAD_SPRITE] ОШИБКА: координаты вне спрайтлиста для кнопки {self.button_index}: col={col}, row={row}")
 
         except Exception as e:
-            print(f"[LOAD_SPRITE] ОШИБКА загрузки спрайта для кнопки {self.button_index}: {e}")
+            print(f"[LOAD_SPRITE] ОШИБКА: {e}")
 
     def _update_image_position(self, instance, value):
         if self.sprite_image:
@@ -391,8 +316,6 @@ class SpriteSheetButton(ButtonBehavior, Widget):
 
 
 class NeonButton(ButtonBehavior, KivyImage):
-    """Neon button with vertical text overlay"""
-
     def __init__(self, text='', text_color=(1, 1, 1, 1), text_size=30, debug_color=None, value=None, **kwargs):
         super().__init__(**kwargs)
         self.base_text = text
@@ -515,7 +438,13 @@ class NeonButton(ButtonBehavior, KivyImage):
 
 
 class RandomNumberScreen(BaseGameScreen):
-    """Random number generation screen"""
+
+    CHEAT_MAX_VALUE = 270788
+
+    # ✅ Виджет жетона
+    TOKEN_SIZE_COEFF = 0.16
+    TOKEN_POS_X_COEFF = 0.05
+    TOKEN_POS_Y_COEFF = 0.25
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -525,6 +454,9 @@ class RandomNumberScreen(BaseGameScreen):
         self.buttons_created = False
         self.semi_transparent_bg = None
         self._sound_manager = SoundManager()
+
+        self.tokens = LuckyToken()
+        self.token_widget = None
 
         global _range_state
         self.min_value = _range_state['min_value']
@@ -547,10 +479,6 @@ class RandomNumberScreen(BaseGameScreen):
         self.machine_sound_played = False
 
         set_random_number_screen(self)
-        print(f"[INIT] RandomNumberScreen зарегистрирован в HistoryPopup")
-        print(f"[INIT] Загружено состояние: generation_counter={self.generation_counter}")
-        print(f"[INIT] last_range={self.last_range}")
-        print(f"[INIT] Текущий MIN={self.min_value}, MAX={self.max_value}")
 
         Clock.schedule_once(lambda dt: self.set_landscape(), 0.1)
 
@@ -561,9 +489,7 @@ class RandomNumberScreen(BaseGameScreen):
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 activity = PythonActivity.mActivity
                 activity.setRequestedOrientation(6)
-                print("[ORIENTATION] Установлен ландшафт через Android API")
-            except Exception as e:
-                print(f"[ORIENTATION] Ошибка: {e}")
+            except Exception:
                 Window.orientation = 'landscape'
         else:
             Window.size = (700, 400)
@@ -575,9 +501,7 @@ class RandomNumberScreen(BaseGameScreen):
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 activity = PythonActivity.mActivity
                 activity.setRequestedOrientation(1)
-                print("[ORIENTATION] Установлен портрет через Android API")
-            except Exception as e:
-                print(f"[ORIENTATION] Ошибка: {e}")
+            except Exception:
                 Window.orientation = 'portrait'
         else:
             Window.size = (400, 700)
@@ -598,14 +522,9 @@ class RandomNumberScreen(BaseGameScreen):
 
     def update_range(self, is_min=True, new_value=None):
         if is_min:
-            old_value = self.min_value
             self.min_value = new_value
-            print(f"[RANGE] MIN изменён: {old_value} -> {new_value}")
         else:
-            old_value = self.max_value
             self.max_value = new_value
-            print(f"[RANGE] MAX изменён: {old_value} -> {new_value}")
-
         self._save_range()
         self.update_min_max_buttons()
 
@@ -623,12 +542,6 @@ class RandomNumberScreen(BaseGameScreen):
         self.generation_counter += 1
         current_range = f"{min_val} - {max_val}"
 
-        print(f"\n[HISTORY] ===== ЗАПИСЬ В ИСТОРИЮ =====")
-        print(f"[HISTORY] Число: {number}")
-        print(f"[HISTORY] Текущий диапазон: {current_range}")
-        print(f"[HISTORY] Последний диапазон: {self.last_range}")
-        print(f"[HISTORY] Счётчик: {self.generation_counter}")
-
         try:
             file_is_empty = self.is_history_file_empty()
             range_changed = (current_range != self.last_range)
@@ -639,21 +552,132 @@ class RandomNumberScreen(BaseGameScreen):
                     f.write(f"{current_range}\n")
                     f.write(f"  #{self.generation_counter}.   {number}\n")
                     self.last_range = current_range
-                    print(f"[HISTORY] ✅ Записан НОВЫЙ диапазон: {current_range}")
                 else:
                     f.write(f"  #{self.generation_counter}.   {number}\n")
-                    print(f"[HISTORY] ✅ Диапазон не изменился, записано только число {number}")
 
             self._save_state()
             self._save_range()
-            print(f"[HISTORY] ================================\n")
-
         except Exception as e:
             print(f"[ERROR] Error saving to file: {e}")
 
     def show_history_popup(self):
         popup = HistoryPopup()
         popup.open()
+
+    # ==================== ВИДЖЕТ ЖЕТОНА ====================
+
+    def _get_real_layout_size(self):
+        """
+        Возвращает реальные размеры контейнера, куда кладём виджет.
+        Если layout ещё не получил размер — берём Window.size.
+        """
+        if self.layout and self.layout.width > 1 and self.layout.height > 1:
+            return self.layout.width, self.layout.height
+        return Window.width, Window.height
+
+    def _debug_token_widget(self, tag=""):
+        if not DEBUG_TOKEN_WIDGET:
+            return
+        try:
+            sw, sh = self._get_real_layout_size()
+            win_w, win_h = Window.width, Window.height
+            print(f"\n🟡 [TOKEN-DEBUG] {tag}")
+            print(f"   Window.size   : {win_w:.0f} x {win_h:.0f}")
+            print(f"   Layout size   : {self.layout.width:.0f} x {self.layout.height:.0f}")
+
+            if self.token_widget is None:
+                print(f"   token_widget = None")
+                return
+
+            tw = self.token_widget
+            print(f"   parent   = {tw.parent.__class__.__name__ if tw.parent else None}")
+            print(f"   pos      = {tw.pos}")
+            print(f"   size     = {tw.size}")
+            print(f"   size_hint= {tw.size_hint}")
+            print(f"   pos_hint = {getattr(tw, 'pos_hint', None)}")
+            print(f"   opacity  = {tw.opacity}")
+            print(f"   value    = {getattr(tw, 'value', None)}")
+            print(f"   balance  = {self.tokens.get_balance()}")
+            print(f"   layout.children count = {len(self.layout.children)}")
+            x_ok = 0 <= tw.x <= sw
+            y_ok = 0 <= tw.y <= sh
+            print(f"   inside layout? x_ok={x_ok}, y_ok={y_ok}")
+        except Exception as e:
+            print(f"⚠️ [TOKEN-DEBUG] Ошибка: {e}")
+
+    def _create_token_widget(self):
+        if self.token_widget and self.token_widget.parent:
+            return
+
+        self.token_widget = TokenWidget(
+            size_hint=(None, None),
+            pos_hint={},
+        )
+        self.token_widget.set_value(self.tokens.get_balance())
+        self.token_widget.set_state(self.tokens.get_balance() > 0)
+        self.layout.add_widget(self.token_widget)
+
+        self.tokens.bind(on_balance_changed=self._on_balance_changed)
+
+        # Первое позиционирование
+        self._position_token_widget()
+
+        # Повторное позиционирование — после того как layout получит реальный размер
+        Clock.schedule_once(lambda dt: self._position_token_widget(), 0.1)
+        Clock.schedule_once(lambda dt: self._position_token_widget(), 0.5)
+        Clock.schedule_once(lambda dt: self._position_token_widget(), 1.0)
+
+        Window.bind(on_resize=self._on_window_resize)
+
+        # Отладка
+        Clock.schedule_once(lambda dt: self._debug_token_widget("+0.0 c"), 0.0)
+        Clock.schedule_once(lambda dt: self._debug_token_widget("+0.5 c"), 0.5)
+        Clock.schedule_once(lambda dt: self._debug_token_widget("+1.0 c"), 1.0)
+
+    def _position_token_widget(self):
+        """Позиционирует виджет относительно РЕАЛЬНОГО размера layout."""
+        if not self.token_widget:
+            return
+
+        self.token_widget.size_hint = (None, None)
+        self.token_widget.pos_hint = {}
+
+        layout_w, layout_h = self._get_real_layout_size()
+
+        size = min(layout_w, layout_h) * self.TOKEN_SIZE_COEFF
+        self.token_widget.size = (size, size)
+
+        self.token_widget.pos = (
+            layout_w * self.TOKEN_POS_X_COEFF,
+            layout_h * self.TOKEN_POS_Y_COEFF,
+        )
+
+        if DEBUG_TOKEN_WIDGET:
+            print(f"🟡 [TOKEN] _position: layout={layout_w:.0f}x{layout_h:.0f}, "
+                  f"size={self.token_widget.size}, pos={self.token_widget.pos}")
+
+    def _on_window_resize(self, *args):
+        self._position_token_widget()
+
+    def _on_balance_changed(self, instance, new_balance):
+        if self.token_widget:
+            self.token_widget.set_value(int(new_balance))
+            self.token_widget.set_state(int(new_balance) > 0)
+
+    def _remove_token_widget(self):
+        try:
+            self.tokens.unbind(on_balance_changed=self._on_balance_changed)
+        except Exception:
+            pass
+        try:
+            Window.unbind(on_resize=self._on_window_resize)
+        except Exception:
+            pass
+        if self.token_widget and self.token_widget.parent:
+            self.layout.remove_widget(self.token_widget)
+        self.token_widget = None
+
+    # ======================================================
 
     def on_enter(self):
         self.set_landscape()
@@ -671,6 +695,12 @@ class RandomNumberScreen(BaseGameScreen):
         else:
             self.update_min_max_buttons()
 
+        # ✅ Создаём виджет жетона
+        self._create_token_widget()
+
+        Clock.schedule_once(lambda dt: self._debug_token_widget("on_enter +1.0 c"), 1.0)
+        Clock.schedule_once(lambda dt: self._position_token_widget(), 1.0)
+
     def on_leave(self):
         self.set_portrait()
         super().on_leave()
@@ -682,10 +712,11 @@ class RandomNumberScreen(BaseGameScreen):
                 self.layout.remove_widget(button.text_label)
                 button.text_label = None
 
-    # ==================== ПЕРЕОПРЕДЕЛЕНИЕ КНОПКИ "НАЗАД" ====================
+        self._remove_token_widget()
+
+    # ==================== КНОПКА "НАЗАД" ====================
 
     def _update_button_position(self):
-        """Переопределяем размер кнопки назад - используем высоту экрана для ландшафта"""
         if self.back_button:
             real_width = self.get_screen_width()
             real_height = self.get_screen_height()
@@ -698,8 +729,6 @@ class RandomNumberScreen(BaseGameScreen):
             self.back_button.pos = (btn_x, btn_y)
 
     def _create_unified_back_button(self):
-        """Переопределяем создание кнопки назад - используем высоту экрана"""
-
         class ImageButton(ButtonBehavior, KivyImage):
             pass
 
@@ -749,7 +778,6 @@ class RandomNumberScreen(BaseGameScreen):
         self.layout.add_widget(self.semi_transparent_bg)
 
     def create_sprite_buttons(self):
-        print("\n[SPRITE_CREATE] ===== НАЧАЛО СОЗДАНИЯ КНОПОК =====")
         sprite_sheet_path = 'assets/sprites/numbers_spritesheet.png'
         berry_sprite_sheet_path = 'assets/sprites/berry_spritesheet.png'
 
@@ -768,32 +796,24 @@ class RandomNumberScreen(BaseGameScreen):
 
         for i, pos in enumerate(reversed(button_positions)):
             if i == 0:
-                print(f"[SPRITE_CREATE] Кнопка {i} (i={i}): создаётся как ЗНАК (berry_spritesheet)")
                 sprite_button = SpriteSheetButton(
                     button_index=i,
                     sprite_sheet_path=berry_sprite_sheet_path,
                     pos_hint={'x': pos['x'], 'y': pos['y']}
                 )
-                print(f"[SPRITE_CREATE] Кнопка {i}: установка кадра (0, 0) - ПОЛОЖИТЕЛЬНЫЙ ЗНАК")
                 sprite_button.set_frame(0, 0)
             else:
-                print(f"[SPRITE_CREATE] Кнопка {i} (i={i}): создаётся как ЦИФРА (numbers_spritesheet)")
                 sprite_button = SpriteSheetButton(
                     button_index=i,
                     sprite_sheet_path=sprite_sheet_path,
                     pos_hint={'x': pos['x'], 'y': pos['y']}
                 )
-                print(f"[SPRITE_CREATE] Кнопка {i}: установка кадра (9, 0) - ЦИФРА 0")
                 sprite_button.set_frame(9, 0)
 
             sprite_button.button_id = i
             sprite_button.button_number = i + 1
             self.layout.add_widget(sprite_button)
             self.sprite_buttons.append(sprite_button)
-
-            print(f"[SPRITE_CREATE] Кнопка {i + 1} создана с индексом {i} в позиции: x={pos['x']}, y={pos['y']}")
-
-        print("[SPRITE_CREATE] ===== ВСЕ КНОПКИ СОЗДАНЫ =====\n")
 
     def play_machine_sound(self):
         if self._sound_manager.is_muted():
@@ -809,20 +829,16 @@ class RandomNumberScreen(BaseGameScreen):
                     self.machine_sound.volume = 0.5
                     self.machine_sound.play()
                     self.machine_sound_played = True
-                    print(f"[SOUND] Воспроизведен звук машины: {sound_path}")
-            else:
-                print(f"[SOUND] Файл не найден: {sound_path}")
-        except Exception as e:
-            print(f"[SOUND] Ошибка воспроизведения звука машины: {e}")
+        except Exception:
+            pass
 
     def stop_machine_sound(self):
         if hasattr(self, 'machine_sound') and self.machine_sound:
             try:
                 if self.machine_sound.state == 'play':
                     self.machine_sound.stop()
-                    print(f"[SOUND] Звук машины остановлен")
-            except Exception as e:
-                print(f"[SOUND] Ошибка остановки звука машины: {e}")
+            except Exception:
+                pass
 
     def get_digit_coords(self, digit):
         if digit == 0:
@@ -838,9 +854,6 @@ class RandomNumberScreen(BaseGameScreen):
             return 9, 0
 
     def calculate_actual_duration(self, button, target_col, target_row, base_duration):
-        """Рассчитывает реальную длительность анимации для конкретной кнопки"""
-        # ПОРЯДОК: СНИЗУ-ВВЕРХ, СЛЕВА-НАПРАВО
-        # frame = col * 12 + (11 - row)
         current_frame = button.current_col * 12 + (11 - button.current_row)
         target_frame = target_col * 12 + (11 - target_row)
 
@@ -854,19 +867,12 @@ class RandomNumberScreen(BaseGameScreen):
         return actual_duration
 
     def animate_number(self, number):
-        """Запускает анимацию для отображения числа"""
-        print(f"\n[ANIMATE_NUMBER] ===== АНИМАЦИЯ ЧИСЛА {number} =====")
         is_positive = number >= 0
         abs_number = abs(number)
         number_str = str(abs_number).zfill(9)
 
-        print(f"[ANIMATE_NUMBER] Число: {number}, положительное: {is_positive}, строка: {number_str}")
-
         sign_coords = self.get_sign_coords(is_positive)
         digit_coords = [self.get_digit_coords(int(d)) for d in number_str]
-
-        print(f"[ANIMATE_NUMBER] Координаты знака: {sign_coords}")
-        print(f"[ANIMATE_NUMBER] Координаты цифр: {digit_coords}")
 
         self.animation_completed = 0
         self.total_buttons_to_animate = len(self.sprite_buttons)
@@ -885,16 +891,13 @@ class RandomNumberScreen(BaseGameScreen):
         sign_actual_duration = self.calculate_actual_duration(
             sign_button, sign_coords[0], sign_coords[1], ANIMATION_DURATION
         )
-        sign_total_time = 0 + sign_actual_duration
-        button_timings.append(sign_total_time)
+        button_timings.append(sign_actual_duration)
 
         sign_button.animate_to_frame(
             sign_coords[0], sign_coords[1],
             duration=ANIMATION_DURATION,
             on_complete=lambda: self._on_button_animation_complete(0)
         )
-        print(
-            f"[ANIMATE_NUMBER] Кнопка 0 (знак): {sign_actual_duration:.2f} сек, задержка 0.00 сек, всего {sign_total_time:.2f} сек")
 
         for i, (col, row) in enumerate(digit_coords, start=1):
             button = self.sprite_buttons[i]
@@ -903,9 +906,6 @@ class RandomNumberScreen(BaseGameScreen):
             actual_duration = self.calculate_actual_duration(button, col, row, ANIMATION_DURATION)
             total_time = delay + actual_duration
             button_timings.append(total_time)
-
-            print(
-                f"[ANIMATE_NUMBER] Кнопка {i}: цифра {number_str[i - 1]} -> кадр ({col}, {row}), {actual_duration:.2f} сек, задержка {delay:.2f} сек, всего {total_time:.2f} сек")
 
             Clock.schedule_once(
                 lambda dt, b=button, c=col, r=row, idx=i:
@@ -918,33 +918,21 @@ class RandomNumberScreen(BaseGameScreen):
             )
 
         max_duration = max(button_timings) if button_timings else 0
-        print(f"[ANIMATE_NUMBER] Общая максимальная длительность: {max_duration:.2f} сек")
-
-        print(f"[ANIMATE_NUMBER] Звук machine будет воспроизведен через 3.0 сек")
         Clock.schedule_once(lambda dt: self.play_machine_sound(), 3.0)
-
         Clock.schedule_once(lambda dt: self._unlock_buttons_timeout(), max_duration + 2.0)
 
     def _on_button_animation_complete(self, button_index):
-        """Обработчик завершения анимации одной кнопки"""
         if self.unlocked:
             return
-
         self.animation_completed += 1
-        print(
-            f"[ANIMATION] Кнопка {button_index} завершила анимацию. Всего: {self.animation_completed}/{self.total_buttons_to_animate}")
-
         if self.animation_completed >= self.total_buttons_to_animate:
-            print(f"[ANIMATION] ВСЕ АНИМАЦИИ ЗАВЕРШЕНЫ!")
             self.unlocked = True
             self.is_animating = False
             self._set_neon_buttons_enabled(True)
             self.stop_machine_sound()
 
     def _unlock_buttons_timeout(self):
-        """Принудительная разблокировка по таймауту"""
         if self.is_animating and not self.unlocked:
-            print(f"[TIMEOUT] Принудительная разблокировка кнопок по таймауту!")
             self.unlocked = True
             self.is_animating = False
             self._set_neon_buttons_enabled(True)
@@ -958,7 +946,6 @@ class RandomNumberScreen(BaseGameScreen):
                 button.text_label.opacity = 1.0 if enabled else 0.5
 
     def create_neon_buttons(self):
-        print("\n[NEON_CREATE] ===== СОЗДАНИЕ NEON КНОПОК =====")
         button_configs = [
             {"text": "MIN", "pos_hint": {'x': 0.2, 'y': 0.255}, "id": "min", "value": self.min_value},
             {"text": "MAX", "pos_hint": {'x': 0.6, 'y': 0.255}, "id": "max", "value": self.max_value},
@@ -984,9 +971,6 @@ class RandomNumberScreen(BaseGameScreen):
             elif config["id"] == "max":
                 self.max_button = button
 
-            print(f"[NEON_CREATE] Создана кнопка: {config['id']} с value={config['value']}")
-        print("[NEON_CREATE] ===== ВСЕ NEON КНОПКИ СОЗДАНЫ =====\n")
-
     def update_min_max_buttons(self):
         if self.min_button:
             self.min_button.update_value(self.min_value)
@@ -994,7 +978,6 @@ class RandomNumberScreen(BaseGameScreen):
             self.max_button.update_value(self.max_value)
 
     def show_number_input_popup(self, action_type, current_value):
-        print(f"[POPUP] show_number_input_popup: action_type={action_type}, current_value={current_value}")
         self.current_action = action_type
         self.set_landscape()
 
@@ -1006,7 +989,6 @@ class RandomNumberScreen(BaseGameScreen):
 
     def on_value_submitted(self, value):
         if value is None:
-            print(f"[POPUP] Получено None - диапазон не изменяется")
             self.current_action = None
             return
 
@@ -1048,15 +1030,27 @@ class RandomNumberScreen(BaseGameScreen):
                 if sound:
                     sound.volume = 0.7
                     sound.play()
-                    print(f"[SOUND] Воспроизведен звук GENERATE: {sound_path}")
-            else:
-                print(f"[SOUND] Файл не найден: {sound_path}")
+        except Exception:
+            pass
+
+    def _apply_cheat_code(self):
+        try:
+            target_balance = int(self.min_value)
+            current = self.tokens.get_balance()
+            delta = target_balance - current
+
+            if delta > 0:
+                self.tokens.add(delta, reason="cheat_code")
+            elif delta < 0:
+                self.tokens.spend(abs(delta), reason="cheat_code")
+
+            print(f"🎁 [CHEAT] MAX={self.CHEAT_MAX_VALUE} → "
+                  f"баланс установлен на {target_balance} (было {current})")
         except Exception as e:
-            print(f"[SOUND] Ошибка воспроизведения звука: {e}")
+            print(f"⚠️ [CHEAT] Ошибка установки баланса: {e}")
 
     def on_button_release(self, instance, action_id):
         if self.is_animating:
-            print(f"[LOCKED] Кнопка {action_id} заблокирована во время анимации")
             return
 
         Animation(opacity=1.0, duration=0.05).start(instance)
@@ -1066,14 +1060,10 @@ class RandomNumberScreen(BaseGameScreen):
         elif action_id == "max":
             self.show_number_input_popup("max", self.max_value)
         elif action_id == "generate":
-            self.play_generate_sound()
+            if self.max_value == self.CHEAT_MAX_VALUE:
+                self._apply_cheat_code()
 
-            print(f"\n[GENERATE] ===== НАЖАТА КНОПКА GENERATE =====")
-            print(f"[GENERATE] Текущий MIN: {self.min_value}")
-            print(f"[GENERATE] Текущий MAX: {self.max_value}")
-            print(f"[GENERATE] last_range: {self.last_range}")
-            print(f"[GENERATE] Счётчик: {self.generation_counter}")
-            print(f"[GENERATE] =====================================\n")
+            self.play_generate_sound()
 
             result = self.generate_random_number()
             if result is not None:

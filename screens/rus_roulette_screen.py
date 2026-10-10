@@ -1,6 +1,5 @@
 import os
 import random
-import math
 
 from kivy.uix.image import Image
 from kivy.uix.behaviors import ButtonBehavior
@@ -18,12 +17,15 @@ from kivy.core.audio import SoundLoader
 from sound_manager import SoundManager
 from screens.base_game_screen import BaseGameScreen
 
+from components.token_widget import TokenWidget
+from lucky_token import LuckyToken
+
 
 class BulletSprite(KivyImage):
     """Спрайт патрона в слоте барабана с поворотом и случайным изображением"""
 
     def __init__(self, slot_number=0, bullet_size=(100, 100), **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(mipmap=True, **kwargs)
         self.slot_number = slot_number
         random_index = random.randint(0, 10)
         self.source = f'assets/images/guns/Bullet_back_{random_index}.png'
@@ -37,6 +39,15 @@ class BulletSprite(KivyImage):
         self.chamber_sound = None
         self._debug_rect = None
 
+        self.bind(texture=self._smooth_texture)
+
+    def _smooth_texture(self, *args):
+        tex = self.texture
+        if tex:
+            tex.mag_filter = 'linear'
+            tex.min_filter = 'linear_mipmap_linear'
+            tex.mipmap = True
+
     def set_loaded(self, loaded):
         self.is_loaded = loaded
         self.opacity = 1 if loaded else 0
@@ -46,13 +57,25 @@ class BulletIcon(ButtonBehavior, Image):
     """Иконка патрона в правом верхнем углу (без серого контура)"""
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(
+            mipmap=True,
+            **kwargs
+        )
         self.source = 'assets/images/guns/Drum_1024x1024.png'
         self.size_hint = (None, None)
         self.size = (60, 60)
         self.allow_stretch = True
         self.keep_ratio = True
         self._debug_rect = None
+
+        self.bind(texture=self._smooth_texture)
+
+    def _smooth_texture(self, *args):
+        tex = self.texture
+        if tex:
+            tex.mag_filter = 'linear'
+            tex.min_filter = 'linear_mipmap_linear'
+            tex.mipmap = True
 
 
 class BulletSlot(Button):
@@ -108,6 +131,8 @@ class BulletSlot(Button):
 class ChamberModal(ModalView):
     """Модальное окно барабана для зарядки патронов"""
 
+    reject_sound_path = 'assets/sounds/reject.mp3'
+
     def __init__(self, main_screen, **kwargs):
         super().__init__(**kwargs)
         self.main_screen = main_screen
@@ -124,7 +149,98 @@ class ChamberModal(ModalView):
         self.drum_img = None
         self._debug_drum_rect = None
 
+        self.token_widget = None
+
+        # ✅ Звук отказа
+        self.reject_sound = None
+        self._load_reject_sound()
+
         Clock.schedule_once(self.create_chamber_ui, 0.1)
+
+    # ==================== ЗВУК ОТКАЗА ====================
+
+    def _load_reject_sound(self):
+        if os.path.exists(self.reject_sound_path):
+            self.reject_sound = SoundLoader.load(self.reject_sound_path)
+            if self.reject_sound:
+                self.reject_sound.volume = 0.8
+
+    def _play_reject_sound(self):
+        """Звук отказа — играет, когда нет жетонов."""
+        sm = SoundManager()
+        if sm.is_muted():
+            return
+        if self.reject_sound:
+            try:
+                if self.reject_sound.state == 'play':
+                    self.reject_sound.stop()
+                self.reject_sound.play()
+            except Exception:
+                pass
+
+    # ======================================================
+
+    # ==================== ЖЕТОН ВНУТРИ МОДАЛКИ ====================
+
+    def _create_token_widget(self):
+        if self.token_widget and self.token_widget.parent:
+            return
+        # size_hint и pos_hint берутся из TokenWidget.DEFAULT_*
+        self.token_widget = TokenWidget()
+        self.token_widget.set_value(self.main_screen.tokens.get_balance())
+        self.token_widget.set_state(self.main_screen.tokens.get_balance() > 0)
+        self.layout.add_widget(self.token_widget)
+
+        self.main_screen.tokens.bind(on_balance_changed=self._on_balance_changed)
+
+    def _on_balance_changed(self, instance, new_balance):
+        if self.token_widget:
+            self.token_widget.set_value(int(new_balance))
+            self.token_widget.set_state(int(new_balance) > 0)
+
+    def _remove_token_widget(self):
+        try:
+            self.main_screen.tokens.unbind(on_balance_changed=self._on_balance_changed)
+        except Exception:
+            pass
+        self.token_widget = None
+
+    def _flash_token_widget(self):
+        """Трижды мигает цифрой в модалке: красный → жёлтый (3 цикла). Шрифт +15%."""
+        if not self.token_widget:
+            return
+        label = self.token_widget.value_label
+        if not label:
+            return
+
+        # ✅ Звук отказа — играет, когда виджет начинает мигать красным
+        self._play_reject_sound()
+
+        yellow = (1, 0.9, 0.2, 1)
+        red = (1, 0, 0, 1)
+
+        original_font_size = label.font_size
+        label.font_size = original_font_size * 1.15
+
+        schedule = [
+            (0.00, red), (0.25, yellow), (0.50, red),
+            (0.75, yellow), (1.00, red), (1.25, yellow),
+        ]
+
+        def make_apply(color, is_last=False):
+            def _apply(dt):
+                if not (self.token_widget and self.token_widget.value_label):
+                    return
+                self.token_widget.value_label.color = color
+                if is_last:
+                    self.token_widget._update_layout()
+            return _apply
+
+        for delay, color in schedule:
+            is_last = (delay == schedule[-1][0])
+            Clock.schedule_once(make_apply(color, is_last), delay)
+
+    # =========================================================
 
     def create_chamber_ui(self, dt=None):
         if hasattr(self.main_screen, 'get_screen_width'):
@@ -141,7 +257,8 @@ class ChamberModal(ModalView):
                 size=(drum_size, drum_size),
                 pos_hint={'center_x': 0.5, 'center_y': 0.5},
                 allow_stretch=True,
-                keep_ratio=True
+                keep_ratio=True,
+                mipmap=True,
             )
             self.layout.add_widget(self.drum_img)
         except:
@@ -193,6 +310,7 @@ class ChamberModal(ModalView):
             self.layout.add_widget(charge_zone)
 
         self.create_close_image()
+        self._create_token_widget()
 
     def create_close_image(self):
         close_image_path = 'assets/images/guns/load_button.png'
@@ -227,10 +345,21 @@ class ChamberModal(ModalView):
 
     def toggle_slot(self, slot_index):
         bullet = self.bullet_sprites[slot_index]
-        new_state = not bullet.is_loaded
+        was_loaded = bullet.is_loaded
+        new_state = not was_loaded
+
+        tokens = self.main_screen.tokens
+
+        if new_state and not was_loaded:
+            if tokens.get_balance() <= 0:
+                self._flash_token_widget()
+                return
+            tokens.spend(1, reason="load_bullet")
+        elif was_loaded and not new_state:
+            tokens.add(1, reason="unload_bullet")
+
         bullet.set_loaded(new_state)
 
-        # ВИБРАЦИЯ: короткая при заряжании/разряжании патрона
         if hasattr(self.main_screen, 'vibrate_short'):
             self.main_screen.vibrate_short()
 
@@ -252,6 +381,10 @@ class ChamberModal(ModalView):
             self.main_screen.play_chamber_sound()
         self.close_modal(instance)
 
+    def dismiss(self, *args, **kwargs):
+        self._remove_token_widget()
+        super().dismiss(*args, **kwargs)
+
 
 class RusRouletteScreen(BaseGameScreen):
     """Реалистичная русская рулетка с жестовым управлением"""
@@ -259,11 +392,12 @@ class RusRouletteScreen(BaseGameScreen):
     background_image = 'assets/backgrounds/rus_roulette_bg_1024x1024.jpg'
     GUN_WIDTH_COEFF = 1.1
 
-    # КОЭФФИЦИЕНТЫ ДЛЯ ЗОНЫ МЕРЦАНИЯ (относительно виджета пистолета)
-    CHAMBER_HIGHLIGHT_WIDTH_COEFF = 0.2  # Ширина зоны = ширина пистолета * 0.2
-    CHAMBER_HIGHLIGHT_HEIGHT_COEFF = 0.15  # Высота зоны = высота пистолета * 0.15
-    CHAMBER_HIGHLIGHT_POS_X_COEFF = 0.65  # Позиция X = 65% от ширины пистолета
-    CHAMBER_HIGHLIGHT_POS_Y_COEFF = 0.55  # Позиция Y = 55% от высоты пистолета
+    CHAMBER_HIGHLIGHT_WIDTH_COEFF = 0.2
+    CHAMBER_HIGHLIGHT_HEIGHT_COEFF = 0.15
+    CHAMBER_HIGHLIGHT_POS_X_COEFF = 0.65
+    CHAMBER_HIGHLIGHT_POS_Y_COEFF = 0.55
+
+    reject_sound_path = 'assets/sounds/reject.mp3'
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -287,7 +421,6 @@ class RusRouletteScreen(BaseGameScreen):
         self.sound_manager = SoundManager()
         self._tap_timer = None
 
-        # Флаг блокировки повторных выстрелов
         self.is_processing_shot = False
 
         self.chamber_sound = None
@@ -295,6 +428,14 @@ class RusRouletteScreen(BaseGameScreen):
         self.misfire_sound = None
         self.bullet_load_sound = None
         self.revolve_sound = None
+
+        # --- Жетон ---
+        self.tokens = LuckyToken()
+        self.token_widget = None
+
+        # ✅ Звук отказа
+        self.reject_sound = None
+        self._load_reject_sound()
 
         self.bind(size=self._update_positions)
 
@@ -304,11 +445,33 @@ class RusRouletteScreen(BaseGameScreen):
     def get_screen_height(self):
         return super().get_screen_height()
 
-    def play_revolve_sound(self):
-        # Проверяем, не выключен ли звук глобально
+    # ==================== ЗВУК ОТКАЗА ====================
+
+    def _load_reject_sound(self):
+        if os.path.exists(self.reject_sound_path):
+            self.reject_sound = SoundLoader.load(self.reject_sound_path)
+            if self.reject_sound:
+                self.reject_sound.volume = 0.8
+
+    def _play_reject_sound(self):
+        """Звук отказа — играет, когда нет жетонов."""
         if self.sound_manager.is_muted():
             return
+        if self.reject_sound:
+            try:
+                if self.reject_sound.state == 'play':
+                    self.reject_sound.stop()
+                self.reject_sound.play()
+            except Exception:
+                pass
 
+    # ======================================================
+
+    # ==================== ЗВУКИ ====================
+
+    def play_revolve_sound(self):
+        if self.sound_manager.is_muted():
+            return
         try:
             if not self.revolve_sound:
                 self.revolve_sound = SoundLoader.load('assets/sounds/Roulette/revolve.ogg')
@@ -320,10 +483,8 @@ class RusRouletteScreen(BaseGameScreen):
             pass
 
     def play_bullet_load_sound(self):
-        # Проверяем, не выключен ли звук глобально
         if self.sound_manager.is_muted():
             return
-
         try:
             if not self.bullet_load_sound:
                 self.bullet_load_sound = SoundLoader.load('assets/sounds/Roulette/bullet_load.ogg')
@@ -335,10 +496,8 @@ class RusRouletteScreen(BaseGameScreen):
             pass
 
     def play_chamber_sound(self):
-        # Проверяем, не выключен ли звук глобально
         if self.sound_manager.is_muted():
             return
-
         try:
             if not self.chamber_sound:
                 self.chamber_sound = SoundLoader.load('assets/sounds/Roulette/chamber_out.ogg')
@@ -350,10 +509,8 @@ class RusRouletteScreen(BaseGameScreen):
             pass
 
     def play_gun_shot_sound(self):
-        # Проверяем, не выключен ли звук глобально
         if self.sound_manager.is_muted():
             return
-
         try:
             if not self.gun_shot_sound:
                 self.gun_shot_sound = SoundLoader.load('assets/sounds/Roulette/gun_shot.ogg')
@@ -365,10 +522,8 @@ class RusRouletteScreen(BaseGameScreen):
             pass
 
     def play_misfire_sound(self):
-        # Проверяем, не выключен ли звук глобально
         if self.sound_manager.is_muted():
             return
-
         try:
             if not self.misfire_sound:
                 self.misfire_sound = SoundLoader.load('assets/sounds/Roulette/misfire.ogg')
@@ -379,9 +534,10 @@ class RusRouletteScreen(BaseGameScreen):
         except:
             pass
 
+    # ==================== ЖИЗНЕННЫЙ ЦИКЛ ====================
+
     def on_enter(self):
         print(f"🎬 [RusRouletteScreen] Вход на экран, is_muted={self.sound_manager.is_muted()}")
-        # Если звук выключен - не запускаем fade
         if not self.sound_manager.is_muted():
             self.sound_manager.fade_to(0.05, duration=1.0)
         else:
@@ -401,22 +557,96 @@ class RusRouletteScreen(BaseGameScreen):
         self.update_bullet_counter()
         self.update_current_slot()
 
-        # Создаем зону мерцания ПОСЛЕ создания пистолета
+        self._create_token_widget()
+
         Clock.schedule_once(lambda dt: self.create_chamber_highlight(), 0.2)
 
+    # ==================== ЖЕТОН ====================
+
+    def _create_token_widget(self):
+        if self.token_widget and self.token_widget.parent:
+            return
+        # size_hint и pos_hint берутся из TokenWidget.DEFAULT_*
+        self.token_widget = TokenWidget()
+        self.token_widget.set_value(self.tokens.get_balance())
+        self.token_widget.set_state(self.tokens.get_balance() > 0)
+        self.layout.add_widget(self.token_widget)
+        self.tokens.bind(on_balance_changed=self._on_balance_changed)
+
+    def _on_balance_changed(self, instance, new_balance):
+        if self.token_widget:
+            self.token_widget.set_value(int(new_balance))
+            self.token_widget.set_state(int(new_balance) > 0)
+
+    def _remove_token_widget(self):
+        try:
+            self.tokens.unbind(on_balance_changed=self._on_balance_changed)
+        except Exception:
+            pass
+        if self.token_widget and self.token_widget.parent:
+            self.layout.remove_widget(self.token_widget)
+        self.token_widget = None
+
+    def _flash_token_widget(self):
+        """Трижды мигает цифрой: красный → жёлтый (3 цикла). Шрифт +15%."""
+        if not self.token_widget:
+            return
+        label = self.token_widget.value_label
+        if not label:
+            return
+
+        # ✅ Звук отказа — играет, когда виджет начинает мигать красным
+        self._play_reject_sound()
+
+        yellow = (1, 0.9, 0.2, 1)
+        red = (1, 0, 0, 1)
+
+        original_font_size = label.font_size
+        label.font_size = original_font_size * 1.15
+
+        schedule = [
+            (0.00, red), (0.25, yellow), (0.50, red),
+            (0.75, yellow), (1.00, red), (1.25, yellow),
+        ]
+
+        def make_apply(color, is_last=False):
+            def _apply(dt):
+                if not (self.token_widget and self.token_widget.value_label):
+                    return
+                self.token_widget.value_label.color = color
+                if is_last:
+                    self.token_widget._update_layout()
+            return _apply
+
+        for delay, color in schedule:
+            is_last = (delay == schedule[-1][0])
+            Clock.schedule_once(make_apply(color, is_last), delay)
+
+    def _return_unfired_bullets(self):
+        """Возвращает жетоны за невыстреленные патроны."""
+        if not self.bullet_slots:
+            return
+        unfired = sum(1 for s in self.bullet_slots if s.has_bullet)
+        if unfired > 0:
+            self.tokens.add(unfired, reason="return_unfired")
+            for s in self.bullet_slots:
+                s.has_bullet = False
+                s.update_appearance()
+            self.total_bullets = 0
+            self.update_bullet_counter()
+
+    # ====================================================
+
     def update_chamber_highlight_position(self):
-        """Обновляет позицию зоны мерцания относительно пистолета через коэффициенты"""
         if not self.chamber_highlight or not self.gun_image:
             return
 
         gun_pos = self.gun_image.pos
         gun_size = self.gun_image.size
 
-        # Размер зоны через коэффициенты
         zone_width = gun_size[0] * self.CHAMBER_HIGHLIGHT_WIDTH_COEFF
         zone_height = gun_size[1] * self.CHAMBER_HIGHLIGHT_HEIGHT_COEFF
 
-        # Позиция через коэффициенты (центрируем зону)
         pos_x = gun_pos[0] + gun_size[0] * self.CHAMBER_HIGHLIGHT_POS_X_COEFF - zone_width / 2
         pos_y = gun_pos[1] + gun_size[1] * self.CHAMBER_HIGHLIGHT_POS_Y_COEFF - zone_height / 2
 
@@ -437,7 +667,6 @@ class RusRouletteScreen(BaseGameScreen):
         self.chamber_highlight = Widget()
         self.chamber_highlight.size_hint = (None, None)
 
-        # Устанавливаем позицию относительно пистолета через коэффициенты
         self.update_chamber_highlight_position()
 
         with self.chamber_highlight.canvas:
@@ -446,19 +675,13 @@ class RusRouletteScreen(BaseGameScreen):
 
         self.chamber_highlight.opacity = 0
         self.layout.add_widget(self.chamber_highlight)
-        print(f"📍 Зона мерцания: size={self.chamber_highlight.size}, pos={self.chamber_highlight.pos}")
 
     def spin_chamber(self):
         self.play_revolve_sound()
-
-        # ВИБРАЦИЯ: кастомная при вращении барабана (длина указывается в миллисекундах)
-        # Здесь 200 мс - можно изменить на любое значение
         self.vibrate_custom(600)
 
-        old_slot = self.current_slot
         self.current_slot = random.randint(0, 5)
 
-        # Обновляем позицию перед анимацией
         self.update_chamber_highlight_position()
         self.animate_chamber_highlight()
 
@@ -506,7 +729,6 @@ class RusRouletteScreen(BaseGameScreen):
             self.layout.remove_widget(self.gun_image)
 
         screen_width = self.get_screen_width()
-        screen_height = self.get_screen_height()
         gun_width = screen_width * self.GUN_WIDTH_COEFF
 
         try:
@@ -570,8 +792,6 @@ class RusRouletteScreen(BaseGameScreen):
             current_slot.update_appearance()
             self.total_bullets -= 1
             self.update_bullet_counter()
-        else:
-            pass
 
         self.shots_fired += 1
         self.current_slot = (self.current_slot + 1) % 6
@@ -586,7 +806,6 @@ class RusRouletteScreen(BaseGameScreen):
         self.chamber_modal.open()
 
     def on_chamber_tap(self):
-        """Обработка касания на зоне барабана (без свайпа)"""
         if self.is_dragging and self.drag_start_pos:
             self.spin_chamber()
             self.is_dragging = False
@@ -624,8 +843,6 @@ class RusRouletteScreen(BaseGameScreen):
               chamber_zone[1] <= ty <= chamber_zone[1] + chamber_zone[3]):
             self.drag_start_pos = touch.pos
             self.is_dragging = True
-
-            # Таймер для обработки касания (без движения)
             self._tap_timer = Clock.schedule_once(lambda dt: self.on_chamber_tap(), 0.1)
             return True
 
@@ -640,7 +857,6 @@ class RusRouletteScreen(BaseGameScreen):
         distance = Vector(dx, dy).length()
 
         if distance > 30:
-            # Если было движение - отменяем таймер касания
             if self._tap_timer:
                 self._tap_timer.cancel()
                 self._tap_timer = None
@@ -652,7 +868,6 @@ class RusRouletteScreen(BaseGameScreen):
         return True
 
     def on_gun_touch_up(self, instance, touch):
-        # Отменяем таймер касания
         if self._tap_timer:
             self._tap_timer.cancel()
             self._tap_timer = None
@@ -674,7 +889,6 @@ class RusRouletteScreen(BaseGameScreen):
         self.total_bullets = sum(1 for s in self.bullet_slots if s.has_bullet)
 
     def pull_trigger(self):
-        # === БЛОКИРОВКА ПОВТОРНЫХ НАЖАТИЙ ===
         if self.is_processing_shot:
             print("⚠️ Выстрел уже обрабатывается, игнорирую")
             return
@@ -684,10 +898,7 @@ class RusRouletteScreen(BaseGameScreen):
 
         if current_slot.has_bullet:
             self.play_gun_shot_sound()
-
-            # ВИБРАЦИЯ: длинная при выстреле (120 мс)
             self.vibrate_long()
-
             anim = Animation(pos_hint={'center_x': 0.5, 'center_y': 0.46}, duration=0.04)
             anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.51}, duration=0.04)
             anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.5}, duration=0.04)
@@ -695,17 +906,13 @@ class RusRouletteScreen(BaseGameScreen):
             Clock.schedule_once(lambda dt: self._finish_shot(), 0.3)
         else:
             self.play_misfire_sound()
-
-            # ВИБРАЦИЯ: короткая при осечке (30 мс)
             self.vibrate_short()
-
             anim = Animation(pos_hint={'center_x': 0.5, 'center_y': 0.48}, duration=0.03)
             anim += Animation(pos_hint={'center_x': 0.5, 'center_y': 0.5}, duration=0.03)
             anim.start(self.gun_image)
             Clock.schedule_once(lambda dt: self._finish_shot(), 0.15)
 
     def _finish_shot(self):
-        """Завершает обработку выстрела и разблокирует кнопку"""
         self.check_shot_result()
         self.is_processing_shot = False
 
@@ -728,7 +935,6 @@ class RusRouletteScreen(BaseGameScreen):
     def _update_positions(self, instance, value):
         if self.gun_image:
             screen_width = self.get_screen_width()
-            screen_height = self.get_screen_height()
             gun_width = screen_width * self.GUN_WIDTH_COEFF
 
             if hasattr(self.gun_image, 'texture') and self.gun_image.texture:
@@ -739,8 +945,6 @@ class RusRouletteScreen(BaseGameScreen):
                 gun_height = gun_width
 
             self.gun_image.size = (gun_width, gun_height)
-
-            # Обновляем позицию зоны мерцания
             self.update_chamber_highlight_position()
 
         if self.bullet_slots:
@@ -748,16 +952,18 @@ class RusRouletteScreen(BaseGameScreen):
 
     def on_leave(self):
         print(f"🎬 [RusRouletteScreen] Выход с экрана, is_muted={self.sound_manager.is_muted()}")
-        # Если звук выключен - не запускаем fade
         if not self.sound_manager.is_muted():
             self.sound_manager.fade_to(1.0, duration=0.5)
         else:
             print(f"🔇 [RusRouletteScreen] Звук выключен, пропускаем fade_to")
 
-        for sound in [self.chamber_sound, self.gun_shot_sound, self.misfire_sound, self.bullet_load_sound,
-                      self.revolve_sound]:
+        for sound in [self.chamber_sound, self.gun_shot_sound, self.misfire_sound,
+                      self.bullet_load_sound, self.revolve_sound]:
             if sound:
                 sound.stop()
+
+        self._return_unfired_bullets()
+        self._remove_token_widget()
 
         super().on_leave()
 
@@ -765,6 +971,9 @@ class RusRouletteScreen(BaseGameScreen):
         print(f"🏠 [RusRouletteScreen] Возврат в меню, is_muted={self.sound_manager.is_muted()}")
         if not self.sound_manager.is_muted():
             self.sound_manager.fade_to(1.0, duration=0.5)
+
+        self._return_unfired_bullets()
+        self._remove_token_widget()
 
         from main import switch_screen
         switch_screen('menu')
